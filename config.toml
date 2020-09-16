@@ -1,4 +1,4 @@
-baseURL = "https://blog.ryotak.me"
+baseURL = "https://blog.ryotak.me/"
 languageCode = "ja-jp"
 title = "RyotaK's Blog"
 theme = "slim"
