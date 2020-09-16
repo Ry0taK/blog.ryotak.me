@@ -1,4 +1,10 @@
 baseURL = "https://blog.ryotak.me/"
 languageCode = "ja-jp"
 title = "RyotaK's Blog"
-theme = "slim"
+theme = "anatole"
+
+[params]
+title = "RyotaK's Blog"
+author = "RyotaK"
+description = "Hello!"
+profilePicture = "images/profile.jpg"
