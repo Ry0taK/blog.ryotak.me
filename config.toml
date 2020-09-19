@@ -8,3 +8,13 @@ title = "RyotaK's Blog"
 author = "RyotaK"
 description = "Hello!"
 profilePicture = "images/profile.jpg"
+
+[[params.socialIcons]]
+icon = "fa-twitter"
+title = "Twitter"
+url = "https://twitter.com/ryotkak"
+
+[[params.socialIcons]]
+icon = "fa-github"
+title = "GitHub"
+url = "https://github.com/Ry0taK"
