@@ -7,7 +7,7 @@ theme = "anatole"
 title = "RyotaK's Blog"
 author = "RyotaK"
 description = "Hello!"
-profilePicture = "images/profile.jpg"
+profilePicture = "images/profile.webp"
 
 [[params.socialIcons]]
 icon = "fa-twitter"
