@@ -1,5 +1,5 @@
 baseURL = "https://blog.ryotak.me"
-title = "Hugo Theme Fuji"
+title = "RyotaK's Blog"
 
 theme = "fuji"
 hasCJKLanguage = true
@@ -10,7 +10,7 @@ ignoreErrors = ["error-disable-taxonomy"]
 
 ## Change this two to switch between different language
 languageCode = "ja"  # For RSS, view https://www.rssboard.org/rss-language-codes
-defaultContentLanguage = "en"  # For HTML page, now support: en, zh-hans, zh-hant, ja, nl
+defaultContentLanguage = "ja"  # For HTML page, now support: en, zh-hans, zh-hant, ja, nl
 
 summaryLength = 100 # Custom summary length, add <!--more--> in post file to custom split point
 paginate = 10
@@ -50,7 +50,7 @@ paginate = 10
 
   # License at the end of each post
   showLicense = false
-  showToc = true
+  showToc = false
 
   # Open Graph & Twitter Card variables
   # You can also set description and images in post front matter individually
@@ -62,10 +62,6 @@ paginate = 10
 
   # Bangumi image chart id
   # bgmImageChart = "000000"
-
-  # License
-  license = "CC BY-NC-SA 4.0"
-  licenseLink = "http://creativecommons.org/licenses/by-nc-sa/4.0/"
 
   # Comments
   # utterances, see: https://utteranc.es/
