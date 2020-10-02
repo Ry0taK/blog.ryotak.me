@@ -9,8 +9,8 @@ disableKinds = ["taxonomy"]
 ignoreErrors = ["error-disable-taxonomy"]
 
 ## Change this two to switch between different language
-languageCode = "en"  # For RSS, view https://www.rssboard.org/rss-language-codes
-defaultContentLanguage = "en"  # For HTML page, now support: en, zh-hans, zh-hant, ja, nl
+languageCode = "ja"  # For RSS, view https://www.rssboard.org/rss-language-codes
+defaultContentLanguage = "ja"  # For HTML page, now support: en, zh-hans, zh-hant, ja, nl
 
 summaryLength = 100 # Custom summary length, add <!--more--> in post file to custom split point
 paginate = 10
@@ -31,7 +31,7 @@ paginate = 10
   post = "/:section/:filename/" # Custom post links, e.g. "/:year/:month/:title/"
 
 [params]
-  author = "DSRKafuU" # You can also set author in post front matter individually
+  author = "RyotaK" # You can also set author in post front matter individually
   subTitle = "A minimal Hugo theme."
 
   # Use CloudFlare Workers to accelerate the Google Analytics
@@ -127,14 +127,10 @@ paginate = 10
     weight = 5
 
   [[menu.link]]
-    name = "GitHub"
-    url = "https://github.com/amzrk2"
+    name = "Twitter"
+    url = "https://twitter.com/ryotkak"
     weight = 1
   [[menu.link]]
-    name = "Twitter"
-    url = "https://twitter.com/amzrk2"
+    name = "GitHub"
+    url = "https://github.com/Ry0taK"
     weight = 2
-  [[menu.link]]
-    name = "bilibili"
-    url = "https://space.bilibili.com/19767474"
-    weight = 3
