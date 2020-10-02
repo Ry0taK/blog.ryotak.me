@@ -50,7 +50,7 @@ paginate = 10
 
   # License at the end of each post
   showLicense = false
-  showToc = false
+  showToc = true
 
   # Open Graph & Twitter Card variables
   # You can also set description and images in post front matter individually
