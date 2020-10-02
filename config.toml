@@ -10,7 +10,7 @@ ignoreErrors = ["error-disable-taxonomy"]
 
 ## Change this two to switch between different language
 languageCode = "ja"  # For RSS, view https://www.rssboard.org/rss-language-codes
-defaultContentLanguage = "ja"  # For HTML page, now support: en, zh-hans, zh-hant, ja, nl
+defaultContentLanguage = "en"  # For HTML page, now support: en, zh-hans, zh-hant, ja, nl
 
 summaryLength = 100 # Custom summary length, add <!--more--> in post file to custom split point
 paginate = 10
@@ -32,7 +32,7 @@ paginate = 10
 
 [params]
   author = "RyotaK" # You can also set author in post front matter individually
-  subTitle = "A minimal Hugo theme."
+  subTitle = "技術的な話とか"
 
   # Use CloudFlare Workers to accelerate the Google Analytics
   # If you are using this please comment the googleAnalytics above
@@ -49,7 +49,7 @@ paginate = 10
   showReadTime = false
 
   # License at the end of each post
-  showLicense = true
+  showLicense = false
   showToc = true
 
   # Open Graph & Twitter Card variables
