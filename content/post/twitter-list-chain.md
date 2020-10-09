@@ -16,7 +16,7 @@ TwitterはBug Bountyプログラム(脆弱性報奨金制度とも呼ばれる)�
 
 TwitterのGraphQLエンドポイントに対して以下のようなリクエストを送信すると、リストが非公開であったとしてもリストのメンバーリストを取得することが出来た。  
 ```http
-GET /graphql/hb0i_dOixbxEH8o2X9NjVw/ListMembers?variables=%7B%22listId%22%3A%22[ここにリストID]%22%2C%22count%22%3A20%2C%22withTweetResult%22%3Afalse%2C%22withUserResult%22%3Afalse%7D HTTP/1.1
+GET /graphql/iUmNRKLdkKVH4WyBNw9x2A/ListMembers?variables=%7B%22listId%22%3A%22[ここにリストID]%22%2C%22count%22%3A20%2C%22withTweetResult%22%3Afalse%2C%22withUserResult%22%3Afalse%7D HTTP/1.1
 Host: api.twitter.com
 User-Agent: [Redacted]
 Accept: */*
@@ -46,7 +46,7 @@ Cookie: [Redacted]
 ## レートリミットの欠如
 非公開リストのIDを取得する方法を探していた際に、Twitter APIの一部のレートリミットが、ドキュメント上には存在すると書いてあるにも関わらず、実際には存在しないことがわかった。  
 それらのエンドポイントの一つに[`POST /1.1/lists/destroy.json`](https://developer.twitter.com/en/docs/twitter-api/v1/accounts-and-users/create-manage-lists/api-reference/post-lists-destroy)が存在した。  
-このエンドポイントは、リストを削除するためのエンドポイントなのだが、当然非公開リストを削除しようとした所で404が帰ってくるだけだった。  
+このエンドポイントは、リストを削除するためのエンドポイントなのだが、当然他人の非公開リストを削除しようとしたとしても404が帰ってくるだけだった。  
 
 ```http
 POST /1.1/lists/destroy.json
@@ -59,7 +59,7 @@ list_id=[ここにリストID]
 ## タイミング攻撃
 前述のエンドポイントを詳しく調べている際に、TwitterのAPIにリクエストを送った際に帰ってくるレスポンスのほぼ全てに`x-response-time`というヘッダが存在していることがわかった。  
 確認した所、このヘッダはTwitter API内部で処理にかかった時間を正確に返しているようだった。  
-ここまでお膳立てされたらタイミング攻撃しか無いだろうということで試してみた所、他人の非公開リストの削除を試みた場合と存在しないリストの削除を試みた場合とで`x-response-time`の値に～20程の差異が存在した。  
+ここまで露骨な前振りをされたらタイミング攻撃しか無いだろうということで試してみた所、他人の非公開リストの削除を試みた場合と存在しないリストの削除を試みた場合とで`x-response-time`の値に～20程の差異が存在した。  
 これと前述のレートリミットの欠如を組み合わせることにより、非公開リストのIDを現実的な時間内で総当りすることが可能となり、それを報告した所無事にTwitterのセキュリティチームによりトリアージされた。
 
 ## まとめ
