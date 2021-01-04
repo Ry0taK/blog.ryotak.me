@@ -34,11 +34,12 @@ Twitter for Androidは通常のAndroidアプリと同じくJavaで書かれて�
 最初は検証用アプリケーションに誤って書き込み権限を与えてしまったのだと思い、権限を確認したが、明らかに読み取り権限しか与えられていなかった。  
 この時点で、これは脆弱性なのでは？と思い始めたが、確証が得られなかったのでもう少し深く調査することにした。  
 その結果、通常のTwitterのAPI(`POST /1.1/statuses/update.json`等)では、APIの処理が走る前に権限チェックをしていたが(当たり前だが)、どうやらフリート関連のエンドポイントは通常のAPIでは行われる権限チェックが行われていないことが判明した。  
-```json
-{
-    "request":"\/1.1\/statuses\/update.json",
-    "error":"Read-only application cannot POST."
-}
+```bash
+$ twurl /1.1/statuses/update.json --header 'Content-Type: application/json' -d '{"status":"Test"}'
+{"request":"\/1.1\/statuses\/update.json","error":"Read-only application cannot POST."}
+
+$ twurl /fleets/v1/create -X POST --header 'Content-Type: application/json' -d '{"text":"Hey yo"}'
+{"fleet":{"created_at":"2020-11-12T12:29:16.180000000Z","deleted_at":null,"expiration":"2020-11-13T12:29:16.189235445Z","fleet_id":"F1-328253875041691174","fleet_thread_id":"T1-328253875041625638","mentions":null,"mentions_str":null,"read":false,"text":"Hey yo","user_id":1195137762027962368},"fleet_thread_id":"T1-328253875041625638","fleet_id":"F1-328253875041691174","users":null}
 ```
 ## 報告しよう
 脆弱性であることがわかったため、一旦フリート関連のAPIドキュメントの公開を見送り、Twitterに報告することにした。  
