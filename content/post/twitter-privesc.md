@@ -18,7 +18,7 @@ Twitterが公開したフリート機能が使用しているAPIに脆弱性が�
 Twitterは2020年11月10日に、[フリート](https://blog.twitter.com/ja_jp/topics/product/2020/ntroducing-fleets-new-way-to-join-the-conversation-jp.html)と呼ばれる機能を日本に対して公開した。  
 当初はiOS版のクライアントのみに実装されたが、翌日の11日には手元のAndroid端末にフリート機能用の更新が降ってきていたため、APIを解析してみることにした。  
 
-## 解析してみる
+## 解析
 Twitter for Androidは通常のAndroidアプリと同じくJavaで書かれており、難読化はされているものの解析はそこまで難しくない。  
 そのため、[`apktool`](https://ibotpeaches.github.io/Apktool/)と[`dex2jar`](https://github.com/pxb1988/dex2jar)、[`CFR`](https://www.benf.org/other/cfr/)を用いてデコンパイルし、ある程度可読性が高い状態に戻した。(詳細なデコンパイル方法に関してはここでは触れないが、ググれば出てくるのでそちらを参照してほしい。)  
 エンドポイント名がわからなければAPIを解析できないため、`grep`を用いて`fleet`という文字列が含まれる`.java`ファイルを検索し、`/fleet/v1/user_fleets`という文字列が含まれるファイルを発見した。  
@@ -41,7 +41,7 @@ $ twurl /1.1/statuses/update.json --header 'Content-Type: application/json' -d '
 $ twurl /fleets/v1/create -X POST --header 'Content-Type: application/json' -d '{"text":"Hey yo"}'
 {"fleet":{"created_at":"2020-11-12T12:29:16.180000000Z","deleted_at":null,"expiration":"2020-11-13T12:29:16.189235445Z","fleet_id":"F1-328253875041691174","fleet_thread_id":"T1-328253875041625638","mentions":null,"mentions_str":null,"read":false,"text":"Hey yo","user_id":1195137762027962368},"fleet_thread_id":"T1-328253875041625638","fleet_id":"F1-328253875041691174","users":null}
 ```
-## 報告しよう
+## 報告
 脆弱性であることがわかったため、一旦フリート関連のAPIドキュメントの公開を見送り、Twitterに報告することにした。  
 報告は11月12日に行ったのだが、11月18日(実際にはもう数日前だったのだと思う)には修正されており、非常に印象的な修正速度だった。  
 しかしながら、残念なことにフリート関連のAPIがサードパーティのアプリケーションによって使用できていた事自体が問題だったようで、フリート関連のAPIをサードパーティのアプリケーションに叩かせないように変更することで修正されてしまった。  
