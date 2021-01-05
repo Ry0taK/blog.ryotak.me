@@ -55,7 +55,7 @@ Twitterが脆弱性を修正した3日後、同じくフリートのAPIを解析
 この一連の流れで、新機能を解析することの重要さと、どんな大企業でもミスはするという教訓を得ることが出来た。  
 Twitterに報告した際の実際のレポートは[ここ](https://hackerone.com/reports/1032468)から見れるので是非読んでみてほしい。  
   
-このブログ記事に関して、なにか質問等がある場合は[Twitter @ryotkak](https://twitter.com/ryotkak)へDMを飛ばしてください。  
+このブログ記事に関して、なにか質問等がある場合は[Twitter(@ryotkak)](https://twitter.com/ryotkak)へDMを飛ばしてください。  
 
 ## タイムライン
  日付   | 出来事
