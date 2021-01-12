@@ -2,6 +2,7 @@
 title: "Twitterの非公開リストが見れた話"
 date: 2020-10-09T18:00:00+09:00
 draft: false
+tags: ["Twitter", "IDOR", "Brute Force", "Timing Attack", "Bug Bounty"]
 ---
 
 ## はじめに
