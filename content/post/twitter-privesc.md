@@ -2,6 +2,7 @@
 title: "Twitterのフリート機能に対する権限昇格"
 date: 2021-01-05T14:00:00+09:00
 draft: false
+tags: ["Twitter", "Fleet", "Privilege Escalation", "Bug Bounty"]
 ---
 
 ## はじめに
@@ -48,7 +49,8 @@ $ twurl /fleets/v1/create -X POST --header 'Content-Type: application/json' -d '
 
 ## その後
 Twitterが脆弱性を修正した3日後、同じくフリートのAPIを解析してフリートの画像が24時間経った後もCDNから削除されない事を[ツイート](https://twitter.com/donk_enby/status/1330078983350837248)している人がおり、フリート機能の実装に使えた期間はとても短かったのかな、と少しTwitter内部の開発者がかわいそうになってしまった。  
-{{< tweet 1330078983350837248 >}}
+<blockquote class="twitter-tweet" data-twitter-extracted-i1610455177818436366="true"><p lang="en" dir="ltr">i have also just confirmed that the media URLs don't expire after 24h, so you can view fleets after they're deleted</p>— 波兰蠢驴 (@donk_enby) <a href="https://twitter.com/donk_enby/status/1330078983350837248?ref_src=twsrc%5Etfw">November 21, 2020</a></blockquote>
+<script async="" src="https://platform.twitter.com/widgets.js"></script>
 この脆弱性を発見する理由となったGistに関しては、[ここで公開](https://gist.github.com/Ry0taK/005b79eccb4297469a09696dae9fa3c6)しているので何かの役にたててほしい。
 
 ## まとめ
