@@ -2,7 +2,7 @@
 title: "VSCodeのGitHubリポジトリに対する不正なPushアクセス"
 date: 2021-01-12T10:43:55+09:00
 draft: false
-tags: [Bug Bounty, Microsoft, VSCode, RCE]
+tags: ["Bug Bounty", "脆弱性", "Microsoft", "VSCode", "RCE"]
 ---
 
 ## はじめに

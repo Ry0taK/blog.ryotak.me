@@ -1,7 +1,8 @@
 ---
 title: "GitHub Actionsにおけるサプライチェーン攻撃を介したリポジトリ侵害"
-date: 2021-02-16T11:28:40+09:00
+date: 2021-02-15T13:00:00+09:00
 draft: false
+tags: ["GitHub", "脆弱性", "GitHub Actions", "Supply Chain"]
 ---
 
 ## はじめに
@@ -11,7 +12,7 @@ GitHub上で脆弱性を発見した場合は、[GitHub Security Bug Bounty](htt
 
 ## 要約
 GitHub Actionsの仕様上、デフォルトではサプライチェーン攻撃に対する適切な保護が行われないため、特定の条件を満たしたリポジトリを侵害することが出来る。  
-この問題の影響を受けるリポジトリがどの程度存在するかを調査した所、[yay](https://github.com/Jguer/yay)等の広く使われているソフトウェアのリポジトリを含めた複数のリポジトリがこの攻撃に対して脆弱であることがわかった。  
+この問題の影響を受けるリポジトリがどの程度存在するかを調査した所、[yay](https://github.com/Jguer/yay)等の広く使われているソフトウェアのリポジトリを含めた多数のリポジトリがこの攻撃に対して脆弱であることがわかった。  
 
 ## 調査理由
 [GitHub Actionsを使ったDDoSに巻き込まれた](https://blog.utgw.net/entry/2021/02/05/133642)という記事を読み、以前から調査したいと考えていたサプライチェーン攻撃に関連した調査をGitHub Actionsで行うことを思いついたため、調査内容を考え初めた。  
@@ -19,7 +20,7 @@ GitHub Actionsの仕様上、デフォルトではサプライチェーン攻撃
 その結果、同様の挙動をすることがわかったため、本調査を実施することにした。  
 
 ## 脆弱なサプライチェーン
-GitHub Actionsの`uses`構文には、他のユーザーが作成したActionを指定し、ワークフロー内に組み込むことが出来る機能が存在する。  
+GitHub Actionsには、`uses`という他のユーザーが作成したActionを指定し、ワークフロー内に組み込むことが出来る構文が存在する。  
 この機能では、デフォルトで整合性チェックが行われておらず、結果として参照先のActionが改竄されていたとしても正常に処理が実行されてしまう。  
 参照先のActionが書き換えられた場合、ワークフローの発火元のイベントが`pull_request`以外であれば[^1]、Action側が参照するシークレットを指定できるため[^2]、書き込み権限を持つ`GITHUB_TOKEN`の窃取に繋がり、結果としてリポジトリを侵害することが可能となる。  
 これは、サプライチェーンの保護という観点においては推奨されるものではない。 (例として、[Goでは依存関係の整合性チェックを行っている。](https://www.usenix.org/sites/default/files/conference/protected-files/enigma2020_slides_valsorda.pdf))
@@ -44,14 +45,14 @@ GitHub Actionsの`uses`構文には、他のユーザーが作成したActionを
 
 ## 調査
 前述の通り、Actionを公開している開発者がユーザー名をした後、それが検出されずに放置されている可能性がある程度存在する。  
-その状態になっているリポジトリを検出するため、以下の検索クエリにマッチするリポジトリの取得を[コード検索API](https://docs.github.com/en/rest/reference/search#search-code)から試みた。  
+その状態になっているリポジトリを検出するため、以下の検索クエリにマッチするワークフローファイルの取得を[コード検索API](https://docs.github.com/en/rest/reference/search#search-code)から試みた。  
 
 ```
 path:.github/workflows language:yaml uses
 ```
 
 調査時点で919,249件のファイルが上記の条件にマッチしたが、GitHubは検索結果の最初の1000件のみを返すため、全件取得ができない。  
-そのため、[`size`クエリパラメータ](https://docs.github.com/en/github/searching-for-information-on-github/searching-code#search-by-file-size)を用い、検索APIから取得できるデータ数を最大化した。  
+そのため、[`size`クエリパラメータ](https://docs.github.com/en/github/searching-for-information-on-github/searching-code#search-by-file-size)を用い、検索APIから取得できるデータ数を可能な限り増やした。  
 これにより、810,177件のワークフローを取得することができた。  
 
 また、このエンドポイントはファイルの内容をレスポンスに含めないため、ワークフローを解析するためには別のエンドポイントを叩く必要があった。  
@@ -78,7 +79,7 @@ query{
 }
 ```
 
-それぞれのワークフローを簡単なスクリプトで解析した結果、以下のような内訳になりました。  
+それぞれのワークフローを簡単なスクリプトで解析した結果、以下のような内訳になった。  
 
 |件数|概要|
 |---|---|
