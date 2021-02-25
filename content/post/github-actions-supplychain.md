@@ -31,15 +31,15 @@ GitHub Actionsには、`uses`という他のユーザーが作成したActionの
 
 ![GitHub Actionsのワークフロー内で参照したActionが悪意あるものだった時の画像](/img/github-actions-simple.png)
 
-## GitHubのRepository Redirects
-また、この問題を深刻化させている機能に、[Repository Redirects](https://github.blog/2013-05-16-repository-redirects-are-here/)という物がある。  
+## GitHubのリポジトリリダイレクト
+また、この問題を深刻化させている機能に、[リポジトリリダイレクト](https://github.blog/2013-05-16-repository-redirects-are-here/)が挙げられる。  
 これは、リポジトリのオーナーがリポジトリ名やユーザー名を変更した後、元のユーザー名とリポジトリ名を使用した参照を行う際に自動でリダイレクトする機能で、これによりActionを提供している開発者がGitHubのユーザー名を変更した後も、そのActionを使用しているワークフローは動作し続ける。  
 
-![GitHub ActionsにおけるRepository Redirectsの動作方法の画像](/img/github-actions-redir.png)
+![GitHub Actionsにおけるリポジトリリダイレクトの動作方法の画像](/img/github-actions-redir.png)
 
 しかしながら、このリダイレクトは攻撃者が簡単に制御することが可能となっている。  
 攻撃者は、リポジトリオーナーの元々のIDを取得し、同名のリポジトリを作成することによりこのリダイレクトを止め、攻撃者が制御するリポジトリを参照するように変更することができる。  
-![GitHub Actionsにおいて、攻撃者がRepository Redirectsを制御している画像](/img/github-actions-compromised.png)
+![GitHub Actionsにおいて、攻撃者がリポジトリリダイレクトを制御している画像](/img/github-actions-compromised.png)
 
 これにより、Actionを公開している開発者がユーザー名を変更した後、ワークフローが参照しているActionが移動したことに気がつけず、長期間に渡ってリポジトリが脆弱な状況に置かれる可能性が高まる。  
 
