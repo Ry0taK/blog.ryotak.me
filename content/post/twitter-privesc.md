@@ -2,7 +2,7 @@
 title: "Twitterのフリート機能に対する権限昇格"
 date: 2021-01-05T14:00:00+09:00
 draft: false
-tags: ["Twitter", "Fleet", "Privilege Escalation", "Bug Bounty"]
+tags: ["Twitter", "脆弱性", "Fleet", "Privilege Escalation", "Bug Bounty"]
 ---
 
 ## はじめに
