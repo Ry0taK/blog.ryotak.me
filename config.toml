@@ -33,7 +33,7 @@ paginate = 10
 [params]
   author = "RyotaK" # You can also set author in post front matter individually
   subTitle = "技術的な話とか"
-
+  disableDarkImage = true
   # Use CloudFlare Workers to accelerate the Google Analytics
   # If you are using this please comment the googleAnalytics above
   # Check https://github.com/SukkaW/cloudflare-workers-async-google-analytics for more details
