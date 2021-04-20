@@ -4,7 +4,7 @@ date: 2021-04-19T20:18:29+09:00
 tags: ["Homebrew", "脆弱性", "Ruby", "Supply Chain"]
 ---
 
-この記事は日本語でも投稿されています: https://blog.ryotak.me/post/homebrew-security-incident/
+この記事は日本語でも投稿されています: https://blog.ryotak.me/post/homebrew-security-incident/  
 (もし日本語が読める場合、筆者は英語がそこまで得意ではないため、日本語の記事を読むことをお勧めします。)
 ## Preface
 Homebrew project is running a "Vulnerability Disclosure Program" on HackerOne, which allows hackers to perform vulnerability assessment.  
@@ -12,127 +12,130 @@ This article describes a vulnerability assessment that is performed with permiss
 If you found any vulnerabilities in Homebrew, please report it to [Homebrew project's vulnerability disclosure program](https://hackerone.com/homebrew).
 
 ## TL;DR
-In the `Homebrew/homebrew-cask` repository, it was possible to merge the malicious pull request by spoofing the library that is used in automated pull request review script developed by Homebrew.  
+In the `Homebrew/homebrew-cask` repository, it was possible to merge the malicious pull request by confusing the library that is used in automated pull request review script developed by Homebrew project.  
 By abusing it, an attacker could execute arbitrary Ruby codes on users' machine who uses `brew`.  
 
 ## Reason to investigate
-One afternoon, I have some free times before having the next plan. So I decided to find an interesting program on HackerOne.  
-自分が利用しているサービス/ソフトウェアの脆弱性を優先して探したいと思ったため、手元のPCの中を漁っていると、`brew`コマンドに目が行った。  
-以前、HackerOne上のプログラム一覧を眺めているときに、Homebrewというプログラムを見かけたことを思い出し、せっかくなので脆弱性を探すことにした。  
+One afternoon, I had a slight time before my next appointment[^1], so I decided to look for an interesting program on HackerOne.  
+As I wanted to find a vulnerability in softwares/services I was using, I looked around on my PC, and `brew` command caught my eyes.  
+Then, I remembered that I saw a program named Homebrew on HackerOne, so I decided to find vulnerability on it.   
 
-![HackerOne上のHomebrewプログラムの画像](/img/homebrew-hackerone-program.png)
+![Homebrew program on HackerOne](/img/homebrew-hackerone-program.png)
 
-[^1]: 具体的に言うと、改善前の[Dead by Daylight](https://ja.wikipedia.org/wiki/Dead_by_Daylight)のマッチ待ち時間ぐらい
-## 調査対象の選定
-調査する対象を選定するために、脆弱性開示制度のポリシーページを確認すると、`brew`コマンド本体の他に`Homebrew/homebrew-*`にマッチするGitHubリポジトリに関する脆弱性報告を受け付けていることに気がついた。  
-複雑なRubyのコードを読むのが苦手なので、ひとまず`Homebrew/homebrew-*`における脆弱性を探すことにした。  
+[^1]: Specifically, it's about the same as the [Dead by Daylight](https://en.wikipedia.org/wiki/Dead_by_Daylight) match wait time before improvement.
+## Selection of targets
+To select the target, I looked at the policy page of vulnerability disclosure program. And I noticed that `Homebrew/homebrew-*` is in scope.  
+As I'm not good at reading complicated Ruby codes, I decided to find a vulnerability in `Homebrew/homebrew-*`.
 
-![HackerOne上のHomebrewプログラムにおけるスコープセクション](/img/homebrew-hackerone-scope.png)
+![Homebrew program's scope section](/img/homebrew-hackerone-scope.png)
 
-## 初期調査
-GitHubリポジトリにおける脆弱性は、主に以下の2つが多いように思われる。
-1. 当該のリポジトリに対する書き込み権限を持ったトークンの漏洩
-2. 当該のリポジトリが利用しているCIスクリプトにおける脆弱性
+## Initial investigation
+I think the following two vulnerabilities are common in GitHub repositories:
+1. Leakage of API tokens that has permission against the repository
+2. Vulnerabilities in the CI script that is used by the repository
 
-そのため、これら2つの脆弱性に絞り、脆弱性を確認していくことにした。  
-1つ目に関して確認するために、[Homebrew](https://github.com/Homebrew)に所属しているユーザーが所有しているリポジトリをすべて取得し、それらの中からトークンと思わしき文字列を抽出していった。  
-しかしながら、この方法での脆弱性が見つかるのは非常に稀であり、当然有効なトークンは見つからなかった。[^2]  
+So, I started to check these 2 vulnerability types on repositories that is in scope.  
+To check the first vulnerability, I cloned all repositories created by the member of [Homebrew](https://github.com/Homebrew) and scanned a token-like string.  
+However, as GitHub has a feature to scan for leaked tokens, this type of vulnerabilities are not common these days.    
+And as expected, I couldn't find any valid tokens.[^2]  
 
-そのため、2つ目に関連した脆弱性が無いかどうか確認することにした。  
+Then, I started to read codes to check second one.  
 
-[^2]: また、Homebrewでは2018年に[GitHub API Tokenの漏洩に関連したインシデント](https://brew.sh/2018/08/05/security-incident-disclosure/)が発生していたため、所属メンバーの意識も高かったものと思われる。
+[^2]: In addition, Homebrew had [an incident related to the leakage of GitHub API Token](https://brew.sh/2018/08/05/security-incident-disclosure/) in 2018, so it seems that the awareness of the members was high enough.
 
-## CIスクリプトの調査
-Homebrewは、CIスクリプトを実行するために[GitHub Actions](https://github.com/features/actions)を使用している。[^3]  
-そのため、各リポジトリの`.github/workflows/`配下のファイルを調べていくことにした。  
+## Investigation of CI scripts
+Homebrew project uses [GitHub Actions](https://github.com/features/actions) to run the CI scripts. [^3]  
+So I looked into `.github/workflows/` directory of each repositories.  
 
-いくつかのリポジトリを確認した後、`Homebrew/homebrew-cask`に置かれていた[`review.yml`](https://github.com/Homebrew/homebrew-cask/blob/aa89774e95530994ae95a9e6aad7eca1bde41033/.github/workflows/review.yml)と、[`automerge.yml`](https://github.com/Homebrew/homebrew-cask/blob/4986c6b25133c8e536a4f39136c8dafe20ff2a38/.github/workflows/automerge.yml)に非常に強い関心を持った。  
-どうやら、`review.yml`がユーザーが送信したプルリクエストの内容を確認し、そのプルリクエストが非常に単純な変更(例: バージョンアップなど)のみを加える場合、自動でプルリクエストを承認し、その後`automerge.yml`が承認されたプルリクエストを自動でマージしているようだった。  
+After reviewing some repositories, I was very interested in [`review.yml`](https://github.com/Homebrew/homebrew-cask/blob/aa89774e95530994ae95a9e6aad7eca1bde41033/.github/workflows/review.yml) and [`automerge.yml`](https://github.com/Homebrew/homebrew-cask/blob/4986c6b25133c8e536a4f39136c8dafe20ff2a38/.github/workflows/automerge.yml) of `Homebrew/homebrew-cask`.  
+It looks like `review.yml` checks contents of user-submitted pull request, and if that pull request is simple enough (e.g. Bumps version), it'll approve these pull requests.  
+After that, `automerge.yml` automatically merges approved pull requests.  
 
-![review.ymlの抜粋画像](/img/homebrew-review-workflow.png)
-![automerge.ymlの抜粋画像](/img/homebrew-automerge-workflow.png)
+![review.yml summary](/img/homebrew-review-workflow.png)
+![automerge.yml summary](/img/homebrew-automerge-workflow.png)
 
-[^3]: 直近3つの記事が全てGitHub Actionsに関連したものであることに関しては非常に申し訳ないと思っている。 (が、GitHub Actionsは攻撃対象領域として非常に優秀なのだ。)
-## review.ymlの調査
+[^3]: I'm sorry that the last three articles are all related to GitHub Actions. (But GitHub Actions is a very good attack surface.)
+## Investigation of review.yml
 
-`review.yml`が利用しているRubyスクリプト[^4]は変更点をdiffファイルとして取得し、それを[`git_diff`](https://github.com/anolson/git_diff)というGemを用いてパースする。  
-その後、以下の条件を満たしている場合にのみプルリクエストを承認していた。  
-1. 変更中のファイルが1つのみ
-2. ファイルを移動/新規作成/削除していない
-3. 変更中のファイルパスが`\ACasks/[^/]+\.rb\Z`にマッチする
-4. 削除した行数と追加した行数が同数
-5. 削除/追加した行の全てが`/\A[+-]\s*version "([^"]+)"\Z/`か`\A[+-]\s*sha256 "[0-9a-f]{64}"\Z`のどちらかにマッチする
-6. バージョンが変更される場合、フォーマットが以前と同様 (例: `1.2.3` => `2.3.4`)
+The ruby script used by `review.yml`[^4] fetches pull request contents as a diff file, and parses it with [`git_diff`](https://github.com/anolson/git_diff) Gem.  
+And then, it'll approve the pull request only if all conditions below are met:    
+1. Modifying only 1 file
+2. Not moving/creating/deleting file
+3. Target filepath matches `\ACasks/[^/]+\.rb\Z`
+4. Line count of deletions/additions are same
+5. All deletions/additions matches `/\A[+-]\s*version "([^"]+)"\Z/` or `\A[+-]\s*sha256 "[0-9a-f]{64}"\Z`
+6. No changes to format of versions (e.g. `1.2.3` => `2.3.4`)
 
-...等[^5]
+... etc[^5]
 
-条件を精査したが、非常に厳密な条件だったため脆弱性は見つからず、この条件下で任意のコードを挿入するのは不可能であると結論付けた。  
-その後、しばらく他のスクリプトの確認を行っていたのだが、どういうわけかこのスクリプトの事が頭から離れなかった。  
-そのため、このスクリプトを徹底的に調べることにし、diffファイルのパースを行っているライブラリを調べ始めた。  
+I scrutinized conditions above, but I couldn't find any flaws on them. So I concluded it's not possible to inject arbitrary codes in this conditions.    
+After that, I was checking other scripts for a while, but for some reason I couldn't forget about this script.  
+So I decided to dig into this script and started looking at the library that parses the diff file.
 
 [^4]: https://github.com/Homebrew/actions/blob/bac0cf0eef64950c5fa7b60134da80f5f52d87ab/.github/workflows/review-cask-pr.yml
-[^5]: 発見した脆弱性に重要でない条件は省略したが、他にも多数の条件が存在した。
-詳しくは https://github.com/Homebrew/actions/blob/bac0cf0eef64950c5fa7b60134da80f5f52d87ab/.github/workflows/review-cask-pr.yml を確認してほしい。
+[^5]: I omitted the conditions that are not important to the vulnerabilities I found, but there were many other conditions.
+For details, please check https://github.com/Homebrew/actions/blob/bac0cf0eef64950c5fa7b60134da80f5f52d87ab/.github/workflows/review-cask-pr.yml
 
-## git_diffの調査
+## Investigation of git_diff
 
-[`git_diff`](https://github.com/anolson/git_diff)のリポジトリを眺めている際に、[変更された行数のパースが間違っているという旨のIssue](https://github.com/anolson/git_diff/issues/12)を発見した。  
-このIssueを見て、どうにかして`git_diff`を混乱させ、上記の条件を満たすように偽装できないかと考え始めた。  
+While I was looking into [`git_diff`](https://github.com/anolson/git_diff) repository, I found an issue that reports [wrong parsing of changed lines count](https://github.com/anolson/git_diff/issues/12).  
+After seeing this issue, I started wondering if I could somehow confuse `git_diff` and disguise the pull request to meet the above conditions.  
 
-詳しくコードを読んでいくと、どうやら`git_diff`は以下のような処理を行いdiffファイルをパースしているようだった。
-1. ファイルの内容を改行区切りで分割する 
-2. それぞれの行に対して、`^diff --git(?: a/(\S+))?(?: b/(\S+))?`がマッチするかどうかを確認し、マッチすればファイル情報として判定し、現在処理中のファイルを正規表現にマッチしたものに置き換える。
-3. 2でマッチしなければ、以下の正規表現にマッチするかを確認、マッチしていれば変更元/変更先のファイルパスを内容に応じて書き換える。
-![diffファイルの移動元/移動先ファイルパスにマッチする正規表現](/img/homebrew-path-regex.png)
-4. 3でマッチしなければ、ファイル自体の変更として扱い、`+`で始まっていれば追加、`-`で始まっていれば削除、それ以外は元々のファイル内容として扱う。
-5. 上記を繰り返し、全ての行を処理し次第終了する。
 
-一見問題ないように見えるこの処理だが、3の移動元/移動先ファイルパスにマッチするかどうかの判定を複数回走らせることが可能となっていた。  
+It seemed that `git_diff` did the following to parse the diff file:  
+1. Split the contents of the file with line breaks
+2. For each line, check if `^diff --git(?: a/(\S+))?(?: b/(\S+))?` matches, and if so, replace the file information currently being processed with the one that matches the regular expression.
+3. If step 2 didn't match, check if it matches one of the following regular expressions, and if it matches, replace the file path of the source/destination according to the contents.
+![Regex to find file meta lines](/img/homebrew-path-regex.png)
+4. If step 3 didn't match, treat it as a change to the file content, consider it as an addition if it starts with `+`, and a deletion if it starts with `-`, otherwise consider it as the original file content without modifications.
+5. Repeat steps above and finish once all the lines are processed.
 
-GitHubが返すdiffファイルは、以下の構造の変更データをファイルごとに作成し、それを単一ファイルに纏めたものとなっている。
+These processes seems to be okay at first glance, but it was possible to change source/destination file path multiple times in step 3.  
+
+The diff file generated by GitHub will be following format:
 ```diff
-diff --git a/変更前のファイルパス b/変更後のファイルパス
-index 親コミットハッシュ..現コミットハッシュ ファイルモード
---- a/変更前のファイルパス
-+++ b/変更後のファイルパス
-@@ 行情報 @@
-以下変更詳細 (例: `+asdf`、`-zxcv`等)
+diff --git a/source file path b/destination file path
+index parent commit hash..current commit hash filemode
+--- a/source file path
++++ b/destination file path
+@@ line information @@
+Details of changes (e.g.: `+asdf`,`-zxcv`)
 ```
 
-行追加に関しては、追加された行の前に`+`を追加することにより表現される。
-つまり、`++ "?b/(.*)`にマッチする行追加であれば、ファイル自体の変更**ではなく**変更中のファイルパス情報として認識されてしまう状態だった。  
-ここで、先程の条件を確認すると、変更中のファイルパスに対する条件は`\ACasks/[^/]+\.rb\Z`だけとなっている。  
-先述の通り変更中のファイルパス情報変更は複数回行えるため、以下のような変更を加えることにより上記の条件を回避し、変更された行が0行の無害なプルリクエストと判定させることができる可能性が高かった。[^6]  
+Additional lines will be represented by prepending "+" to the line.  
+
+Which means, if the added line matches `++ "?b/(.*)`, it'll be treated as a file path information rather than the change against file contents.  
+And by checking the required conditions above, I noticed that the required condition for the file path being changed is only `\ACasks/[^/]+\.rb\Z`.  
+As mentioned above, the file path information can be changed multiple times, so the above conditions can be bypassed by making the following changes, and the pull request will be treated as a harmless pull request with 0 line changes. [^6]  
 ```ruby
-++ "b/#{ここに悪意のあるコード}"
+++ "b/#{Arbitrary codes here}"
 ++ b/Casks/cask.rb
 ```
 
-[^6]: 二行目が文字列リテラルになっていないのは意図的であり、`git_diff`のバグにより文字列リテラルを閉じた際のダブルクオーテーションもファイルパスとして扱われてしまうためである。
+[^6]: It is intentional that the second line is not a string literal, because an another bug in `git_diff`, it doesn't ignore double quotes when closing a string literal.
 
-## デモンストレーションの準備
-HackerOne等のバグバウンティプラットフォームは、基本的にPoCや脆弱性のデモンストレーションをレポート内で送信する必要がある。  
-そのため、この脆弱性が実際に悪用可能かどうかを確かめることにした。　 
+## Preparing for the demonstration
+As bug bounty platforms such as HackerOne requires PoC/demonstration in the report, I decided to demonstrate this vulnerability.  
 
-実際に使用されているCaskを許可なく変更するのはあまりよろしくないため、`homebrew-cask`内において、テスト用のCaskを探すことにした。  
-しかしながら、テスト用のCaskは見つからなかったため、仕方なくHomebrewの脆弱性開示制度を担当している方にメールを送信した。  
+Since it's not good idea to modify the casks that is being used without permission, I tried to find a test cask in `homebrew-cask` repository.  
+However, I couldn't find it. So I contacted Homebrew staff who operates vulnerability disclosure program on HackerOne.  
 
-その後、担当している方から`これだけのためにテスト用のCaskを追加する無理なので、代わりに既存のCaskに無害な変更を加えてくれ`という旨の返信が帰ってきた。  
-そのため、適当なCaskを選び、無害な変更を加えることにした。[^7]  
+After that, I received `I can’t add a test cask just for this but you could try to make a harmless modification to an existing cask perhaps?` from the staff.  
+Therefore, I chose a random cask and decided to make harmless changes.
 
-[^7]: この時点では、各Caskファイルは`brew install`を実行した際にしか実行されないと思っていたため、メンテナと連絡が取れている状況を鑑み、すぐに取り消せば実際に変更したコードを実行するユーザーは発生しないと考えていた。
+## Demonstrating the vulnerability
 
-## 脆弱性のデモンストレーション
-この日の前日に[GitHubのAPI Tokenをうっかり載せてしまったプルリクエスト](https://github.com/Homebrew/homebrew-cask/pull/104167)を見かけていたため、このプルリクエストが変更しようとしていた`iterm2.rb`に対して変更を加えることにした。  
+Since I saw [a pull request](https://github.com/Homebrew/homebrew-cask/pull/104167) that inadvertently posted an API Token on GitHub, I decided to make changes to `iterm2.rb` that this pull request was trying to update.  
 
-変更を加える際に気がついたのだが、`++ "b/"`はRubyの文法として間違っていないが、`++ b/Casks/iterm2.rb`は変数を定義しないとエラーになってしまう。  
-そのため、`Homebrew/homebrew-cask`をフォークし、以下の2行を`Casks/iterm2.rb`へ追記した。  
+Before adding the modification, I noticed that `++ b/Casks/iterm2.rb` would throw an error if these variables are not defined.  
+So I forked `Homebrew/homebrew-cask` and added the following 2 lines to `Casks/iterm2.rb`.[^7]  
 ```ruby
 ++ "b/#{puts 'Going to report it - RyotaK (https://hackeorne.com/ryotak)';b = 1;Casks = 1;iterm2 = {};iterm2.define_singleton_method(:rb) do 1 end}"
 ++ b/Casks/iterm2.rb
 ```
-一行目で`b`、`Casks`、`iterm2`、`iterm2.rb`を定義することにより、二行目でエラーが発生しなくなるため、有効なRubyスクリプトとして実行することができるようになる。  
-また、この変更を加えることにより、以下のようなDiffをGitHubが返すようになる。
+By defining `b`,`Casks`,`iterm2`,`iterm2.rb` in the first line, the second line won't throw an error.
+Therefore, it can be executed as a valid Ruby script.  
+Also, by adding these changes, GitHub will return the following diff:
 ```diff
 diff --git a/Casks/iterm2.rb b/Casks/iterm2.rb
 index 3c376126bb1cf9..ba6f4299c1824e 100644
@@ -149,64 +152,72 @@ index 3c376126bb1cf9..ba6f4299c1824e 100644
    desc "Terminal emulator as alternative to Apple's Terminal app"
 ```
 
-前述の通り、`git_diff`は`+++ "?b/(.*)`にマッチする変更を行追加ではなく変更中のファイル情報として扱うため、このDiffは`Casks/iterm2.rb`に対して0行の変更を加えるものとして扱われてしまう。  
+As mentioned above, `git_diff` treats lines that match `+++ "?b/(.*)` as file path information rather than added lines, so this diff will be treated as a pull request that making a change of 0 line.  
 
-この変更を加えた上でプルリクエストを作成[^8]し、脆弱性のデモンストレーションを開始した。  
+After making this change, I made a pull request[^8] and started demonstrating the vulnerability. 
 
+[^7]: At this point, I thought that each cask file will be executed only if it specified in `brew install`.
+Given the situation in which the maintainer was in contact, I thought that if it got reverted immediately, no user would actually execute the modified code.
 [^8]: https://github.com/Homebrew/homebrew-cask/pull/104191
 
-## 問題発生
-その後、しばらく待ってもプルリクエストがマージされず、なぜかと思いCIの実行ログを確認すると、`Required status checks for pull request 104191 are not successful.`というログが出力されていた。  
-失敗しているチェックを洗い出した所、`brew syntax`を実行してコードの構文チェックを行っており、この部分で実行される`Rubocop`がコードが汚いと怒っていることがわかった。  
+## Problem occurred
+Even after waiting for a while, the pull requests were not merged, and when I checked the CI execution log, I noticed `Required status checks for pull request 104191 are not successful.` in the output.  
+By looking into failed checks, I confirmed that a workflow that uses `brew style` was failed, which means [Rubocop](https://github.com/rubocop/rubocop) rejected the changes.  
 
-![GitHub Actions上でRubocopが失敗している画像](/img/homebrew-rubocop-fail.png)
+![Rubocop failed in GitHub Actions](/img/homebrew-rubocop-fail.png)
 
-`Rubocop`は`# rubocop:disable all`というコメントを行末尾に追加することにより、特定の行に対しての警告を無効化することができる。  
-一行目に関してはこれを追記するだけで済んだのだが、二行目は`+++ "?b/(.*)`のグルーピングされている部分にマッチする文字列が`Casks/iterm2.rb`である必要があったため、このコメントを追加することによる解決はできなかった。　　
 
-いくつかの試行錯誤の後、以下のような変更を加えることにより最後の行を変更せずにRubocopを黙らせることが可能であることがわかった。
+Rubocop allows source codes to disable its feature by adding `# rubocop:disable all` in the end of line.  
+The first line could be fixed by adding the comment, but the second line couldn't.  
+As the second line must return `Casks/iterm2.rb` in the capturing group of `+++ "?b/(.*)`, it can't be fixed by just adding the comment.  
+
+After some tries, it turned out that it was possible to ignore Rubocop without changing the last line by making the following changes:
 ```ruby
 ++ "b/#{puts 'Going to report it - RyotaK (https://hackerone.com/ryotak)';b = 1;Casks = 1;iterm2 = {};iterm2.define_singleton_method(:rb) do 1 end; }" # rubocop:disable all
 ++ "b/" if # rubocop:disable all
 ++ b/Casks/iterm2.rb
 ```
-二行目で`if`を追加し、次の行を`if`式として評価させることにより`Operator / used in void context.`という警告が出ないように調整している。  
 
-これにより、プルリクエストに対して実行されているチェックが全て成功するようになり、無事に`BrewTestBot`によってプルリクエストがマージされた。  
-![BrewTestBotが自動的にマージした際の画像](/img/homebrew-merge-success.png)
+By adding `if` in the second line and letting the next line evaluate as a `if` expression, it was possible to fix `Operator / used in void context.` warning.
 
-## 問題発生、再び
-無事にプルリクエストがマージされたため、`brew install iterm2 --cask`を実行し、`Going to report it - RyotaK (https://hackerone.com/ryotak)`が出力されることを確認し、PoCとして画像を送信した。  
+Since all checks on the pull request were successfully ran, `BrewTestBot` merged my pull request.   
+![BrewTestBot merged the pull request](/img/homebrew-merge-success.png)
 
-![brew install iterm2 --caskが変更後のコードを参照している事を示す画像](/img/homebrew-install-poc.png)
+## Problem occurred... again
+As the pull request merged successfully, I executed `brew install iterm2 --cask` and confirmed that `Going to report it - RyotaK (https://hackerone.com/ryotak)` were printed. Then send an image as a PoC in the report.  
 
-その後、送信したレポートに対する返信を待っている間に、以下のようなリプライがTwitter上で送られてきた。  
+![brew install iterm2 --cask executed the modified code](/img/homebrew-install-poc.png)
+
+
+After that, while waiting for a reply to the report I sent, I received the following reply on Twitter.  
 {{< tweet 1383730296609144847 >}}
-一瞬理解できなかったのだが、よく見ると`brew cleanup`を実行した際にも`Going to report it - RyotaK (https://hackerone.com/ryotak)`が表示されてしまっているようだった。  
-慌てて手元で試すと、確かに`brew cleanup`実行時にも`Going to report it - RyotaK (https://hackerone.com/ryotak)`が表示されてしまっていた。  
+I couldn't understand it for few seconds, but somehow `brew cleanup` prints `Going to report it - RyotaK (https://hackerone.com/ryotak)` too.  
 
-この時は非常に慌てていたため気が付かなかったのだが、後から調査した結果、`brew cleanup`以外にも`brew search`等で変更したCaskが実行されてしまうことがわかった。  
-どうやら、一部のコマンドを実行した際に全てのCaskを評価する設計になっていたため、対象のCaskをインストールしていなかったとしても、変更後のコードが実行されてしまう状態になっていたようだった。  
+When I tried it in my machine in a hurry, I could confirm that `Going to report it - RyotaK (https://hackerone.com/ryotak)` was displayed even when `brew cleanup` was executed.  
 
-加えた変更がログを出力するのみだったこと、及びすぐに変更が巻き戻されたことにより大した影響はなかったが、このようなことが起きることを想定していなかったため、非常に焦った。  
+I didn't notice it because I was in a hurry at this time, but as a result of investigating later, I found that modified cask was executed if someone executed `brew search` etc. in addition to `brew cleanup`.  
+Apparently, it was designed to evaluate all casks when some commands were executed, so even if the target cask was not installed, the modified code will be executed.  
 
-## まとめ
-今回の記事では、HomebrewのOfficial Tapに存在した脆弱性について解説しました。  
-この脆弱性が悪用されていた場合、発覚するまでの間に`brew`で特定の操作を行ったユーザー全員のコンピュータが侵害されることに繋がったと考えると、エコシステムに関する監査は必要不可欠だと感じました。  
-PyPI等に対する脆弱性診断も行いたいとは思っているのですが、残念ながら脆弱性開示制度等が設けられていないため、現在の所行うことができません。  
+As the only changes I made were to print additional logs, and maintainers reverted the changes immediately, this didn't have much impacts.  
+However, I was very surpirised because I didn't expect this to happen.  
 
-本記事に関する質問はTwitter([@ryotkak](https://twitter.com/ryotkak))へメッセージを投げてください。
+## Conclusion
+In this article, I described the vulnerability that existed in the Homebrew's official tap.  
+If this vulnerability was abused by a malicious actor, it could be used to compromise the machines that runs `brew` before it get reverted. So I strongly feel that security audit against centralized ecosystem is required.  
+I want to perform security audits against PyPI/npm registry... etc, but as they don't allow the vulnerability assessment explicitly, I can't do that.  
 
-## タイムライン
-|日付 (日本時間)|出来事|
+If you have any comments/questions about this article, please send me a message at Twitter([@ryotkak](https://twitter.com/ryotkak)).  
+
+## Timeline
+|Date (JST)|Event|
 |----|----|
-|2021/04/17|脆弱性の発見|
-|2021/04/17|メンテナに対して連絡|
-|2021/04/18|メンテナからの返信を受信|
-|2021/04/18 17時頃|デモンストレーションを開始|
-|2021/04/18 17時頃|レポートを送信|
-|2021/04/18 18時頃|プルリクエストをマージさせることに成功|
-|2021/04/18 19時頃|プルリクエストが巻き戻される|
-|2021/04/18 20時頃|一次対応が完了|
-|2021/04/19|二次対応が完了|
-|2021/04/XX|インシデントの開示|
+|April 17, 2021|Found the vulnerability|
+|April 17, 2021|Sent an email to the maintainer|
+|April 18, 2021|Received a response from the maintainer|
+|April 18, 2021 5 pm|Started the demonstration|
+|April 18, 2021 5 pm|Sent a report|
+|April 18, 2021 6 pm|Successfully merged the pull request|
+|April 18, 2021 7 pm|Pull request was reverted|
+|April 18, 2021 8 pm|Primary fix completed|
+|April 19, 2021|Secondary fix completed|
+|April XX, 2021|Incident has been disclosed|
