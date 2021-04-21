@@ -1,11 +1,13 @@
 ---
 title: "Remote code execution in Homebrew by compromising the official Cask repository"
-date: 2021-04-19T20:18:29+09:00
+date: 2021-04-21T19:00:00+09:00
 tags: ["Homebrew", "脆弱性", "Ruby", "Supply Chain"]
 ---
 
 この記事は日本語でも投稿されています: https://blog.ryotak.me/post/homebrew-security-incident/  
 (もし日本語が読める場合、筆者は英語がそこまで得意ではないため、日本語の記事を読むことをお勧めします。)
+
+(Official blog post about this incident is available here: https://brew.sh/2021/04/21/security-incident-disclosure/)
 ## Preface
 Homebrew project is running a "Vulnerability Disclosure Program" on HackerOne, which allows hackers to perform the vulnerability assessment.  
 This article describes a vulnerability assessment that is performed with permission from the Homebrew project's staff and is not intended to recommend you to perform an unauthorized vulnerability assessment.  
@@ -220,4 +222,4 @@ If you have any comments/questions about this article, please send me a message 
 |April 18, 2021 7 pm|Pull request was reverted|
 |April 18, 2021 8 pm|Primary fix completed|
 |April 19, 2021|Secondary fix completed|
-|April XX, 2021|Incident has been disclosed|
+|April 21, 2021|Incident has been disclosed|

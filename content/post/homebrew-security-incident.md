@@ -1,10 +1,11 @@
 ---
 title: "HomebrewのCaskリポジトリを介した任意コード実行"
-date: 2021-04-19T20:18:29+09:00
+date: 2021-04-21T19:00:00+09:00
 tags: ["Homebrew", "脆弱性", "Ruby", "Supply Chain"]
 ---
 
 English version is available here: https://blog.ryotak.me/post/homebrew-security-incident-en/
+(公式なインシデント報告はこちらから読むことができます: https://brew.sh/2021/04/21/security-incident-disclosure/)
 ## はじめに
 HomebrewプロジェクトはHackerOne上で脆弱性開示制度(Vulnerability Disclosure Program)を設けており、脆弱性の診断行為が許可されています。  
 本記事は、当該制度に参加し、Homebrewプロジェクトのスタッフから許可を得た上で実施した脆弱性診断行為について解説したものであり、無許可の脆弱性診断行為を推奨することを意図したものではありません。  
@@ -209,4 +210,4 @@ PyPIやnpm registry等に対する脆弱性診断も行いたいとは思って�
 |2021/04/18 19時頃|プルリクエストが巻き戻される|
 |2021/04/18 20時頃|一次対応が完了|
 |2021/04/19|二次対応が完了|
-|2021/04/XX|インシデントの開示|
+|2021/04/21|インシデントの開示|
