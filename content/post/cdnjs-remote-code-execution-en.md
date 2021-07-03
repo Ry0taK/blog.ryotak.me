@@ -221,7 +221,7 @@ By combining these permissions, the core part of cdnjs, such as the origin data 
 ## Conclusion
 In this article, I described the vulnerability that was existed in cdnjs.  
 While this vulnerability could be exploited without any special skills, it could impact many websites.  
-Considering that there are many vulnerabilities in the supply chain, which are easy to exploit but have a very large impact, I feel that it's very scary.  
+Given that there are many vulnerabilities in the supply chain, which are easy to exploit but have a very large impact, I feel that it's very scary.  
 If you have any questions/comments about this article, please send a message to ([@ryotkak](https://twitter.com/ryotkak)) on Twitter.  
 ## Timeline
 |Date (JST)|Event|
