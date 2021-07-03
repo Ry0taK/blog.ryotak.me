@@ -1,64 +1,64 @@
 ---
-title: "Cloudflareのcdnjsにおける任意コード実行+α"
+title: "Remote code execution in cdnjs of Cloudflare"
 date: 2021-07-01T12:53:03+09:00
 draft: false
-tags: ["cdnjs", "脆弱性", "Go", "Supply Chain", "RCE"]
+tags: ["cdnjs", "Vulnerability", "Go", "Supply Chain", "RCE"]
 ---
 
-## はじめに
+## Preface
 
-cdnjsの運営元であるCloudflareは、HackerOne上で脆弱性開示制度(Vulnerability Disclosure Program)を設けており、脆弱性の診断行為が許可されています。  
-本記事は、当該制度を通して報告された脆弱性をCloudflareセキュリティチームの許可を得た上で公開しているものであり、無許可の脆弱性診断行為を推奨することを意図したものではありません。  
-Cloudflareが提供する製品に脆弱性を発見した場合は、[Cloudflareの脆弱性開示制度](https://hackerone.com/cloudflare)へ報告してください。  
+Cloudflare, which runs cdnjs, is running a "Vulnerability Disclosure Program" on HackerOne, which allows hackers to perform the vulnerability assessment.  
+This article describes a vulnerability reported through this program, and published by with the permission of the Cloudflare security team. So this aritcle is not intended to recommend you to perform an unauthorized vulnerability assessment.  
+If you found any vulnerabilities in Cloudflare's product, please report it to [Cloudflare's vulnerability disclosure program](https://hackerone.com/cloudflare).
 
-## 要約
+## TL;DR
+There was a vulnerability in the cdnjs library update server that could execute arbitrary commands, and as a result, cdnjs could be completely compromised.  
+This allows an attacker to tamper 12.6%[^1] of all websites on the internet.  
 
-cdnjsのライブラリ更新用サーバーに任意のコードを実行することが可能な脆弱性が存在し、結果としてcdnjsを完全に侵害することが出来る状態だった。  
-これにより、インターネット上のウェブサイトの内12.6%[^1]を改竄することが可能となっていた。
+[^1]: Quoted from [W3Techs](https://w3techs.com/technologies/details/cd-cdnjs) as of 2 July 2021. Due to the presence of SRI, fewer websites could be tampered immediately.  
 
-[^1]: [W3Techs](https://w3techs.com/technologies/details/cd-cdnjs)より記事執筆時点の情報を引用。SRIの存在により、即座に改竄可能だったウェブサイトはこの数字よりも少なかった。
+## About cdnjs
 
-## cdnjsとは
-
-[cdnjs](https://cdnjs.com)は、Cloudflareによって運営されている無料のJavaScript/CSSライブラリ用CDNであり、記事執筆時点でインターネット上のウェブサイトの12.6%に使用されている。  
-これは、[Google Hosted Libraries](https://developers.google.com/speed/libraries)の12.8%[^2]に次いで2番目に広く使われているライブラリ用CDNであり、現在の使用率の推移を鑑みるに、近いうちに最も使われているJavaScriptライブラリ用CDNになると考えられる。  
+[cdnjs](https://cdnjs.com) is a JavaScript/CSS library CDN that is owned by Cloudflare, which is used by 12.6% of all websites on the internet as of 2 July 2021.  
+This is the second most widely used library CDN after 12.8%[^2] of Google Hosted Libraries, and considering the current usage rate, it will be the most used JavaScript library CDN in the near future.  
 
 <div style="text-align: center;">
   <img src="/img/cdnjs-usage.png" alt="cdnjsのインターネット上での使用率">
-  <p>2021年7月2日時点での<a href="https://w3techs.com/technologies/details/cd-cdnjs" target="_blank">W3Techs</a>におけるcdnjsの使用率グラフ</p>
+  <p>Usage graph of cdnjs from <a href="https://w3techs.com/technologies/details/cd-cdnjs" target="_blank">W3Techs</a>, as of 2 July 2021</p>
 </div>
 
 [^2]: [W3Techs](https://w3techs.com/technologies/details/cd-googlelibraries)より記事執筆時点の情報を引用。
 
-## 調査理由
+## Reason for investigation
 
-前回の[Homebrewにおける任意コード実行](/post/homebrew-security-incident/)に関する調査を行う数週間前に、サプライチェーン攻撃に関する調査を行っていた。  
-多数のアプリケーションが依存するシステムであり、脆弱性調査を許可しているという条件で絞り込んだ際に、cdnjsが対象に入ったため調査を行うことにした。  
+A few weeks before my last investigation into "[Remote code execution in Homebrew by compromising the official Cask repository](http://localhost:19191/post/homebrew-security-incident-en/)", I was investigating supply chain attacks.  
+While finding a service that many software depends on, and is allowing a user to perform the vulnerability assessment, I found cdnjs. So I decided to investigate it.  
 
-## 初期調査
-cdnjsのウェブサイトを眺めている際に、以下のような記述を発見した。
+## Initial investigation
+
+While browsing the cdnjs website, I found the following description.  
 
 > Couldn't find the library you're looking for?  
 You can make a request to have it added on our GitHub repository.
 
-GitHubのリポジトリ上でライブラリの情報を管理している事がわかったため、当該のGitHub Organizationのリポジトリを確認した。  
+I found out that the library information is managed on the GitHub repository, so I checked repositories of the GitHub Organization that is used by cdnjs.  
 
-結果として、以下のような構成になっていることがわかった。  
+As a result, it was found that the repository is used in the following ways.
 
-- [cdnjs/packages](https://github.com/cdnjs/packages): cdnjsに掲載するライブラリの情報を格納
-- [cdnjs/cdnjs](https://github.com/cdnjs/cdnjs): ライブラリの実際のファイル群を格納
-- [cdnjs/logs](https://github.com/cdnjs/logs): ライブラリの更新ログを格納
-- [cdnjs/SRIs](https://github.com/cdnjs/SRIs): 各ライブラリのSRI(Subresource Integrity)を格納
-- [cdnjs/static-website](https://github.com/cdnjs/static-website): cdnjs.comのソースコード
-- [cdnjs/origin-worker](https://github.com/cdnjs/origin-worker): cdnjs.cloudflare.comのオリジン用Cloudflare Worker
-- [cdnjs/tools](https://github.com/cdnjs/tools): cdnjsの管理用ツール
-- [cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible): cdnjsの自動ライブラリ更新用システムのAnsible
+- [cdnjs/packages](https://github.com/cdnjs/packages): Stores library information that is supported in cdnjs
+- [cdnjs/cdnjs](https://github.com/cdnjs/cdnjs): Stores files of libraries
+- [cdnjs/logs](https://github.com/cdnjs/logs): Stores update logs of libraries
+- [cdnjs/SRIs](https://github.com/cdnjs/SRIs): Stores SRI (Subresource Integrity) of libraries
+- [cdnjs/static-website](https://github.com/cdnjs/static-website): Source code of cdnjs.com
+- [cdnjs/origin-worker](https://github.com/cdnjs/origin-worker): Cloudflare Worker for origin of cdnjs.cloudflare.com
+- [cdnjs/tools](https://github.com/cdnjs/tools): cdnjs management tools
+- [cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible): Ansible repository of the cdnjs library update server
 
-これらのリポジトリから分かるように、cdnjsのインフラの大部分はこのGitHub Organizationに集約されている。  
-その中で、[cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible)と[cdnjs/tools](https://github.com/cdnjs/tools)に興味を惹かれた。  
-この2つのリポジトリのコードを読んだ所、[cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible)が定期的に[cdnjs/tools](https://github.com/cdnjs/tools/tree/b6833e08108b2a06b3b3e5f212d604b5951ff924)の`autoupdate`コマンドをライブラリ更新用サーバー内で実行し、[cdnjs/packages](https://github.com/cdnjs/packages)において指定されているGitHubリポジトリ/npmパッケージを用いて更新を確認していることがわかった。  
+As you can see from these repositories, most of the cdnjs infrastructure is centralized in this GitHub Organization.  
+I was interested in [cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible) and [cdnjs/tools](https://github.com/cdnjs/tools) because it automates library updates.  
+After reading codes of these 2 repositories, it turned out [cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible) executes `autoupdate` command of [cdnjs/tools](https://github.com/cdnjs/tools/tree/b6833e08108b2a06b3b3e5f212d604b5951ff924) in the cdnjs library update server periodically, to check updates of library from [cdnjs/packages](https://github.com/cdnjs/packages) by downloading npm package/GitHub repository of libraries.  
 
-## 自動更新機能の調査
+## Investigation of automatic update
 
 この自動更新機能は、ユーザーが管理するGitHubリポジトリ/npmリポジトリをダウンロードし、対象のファイルをコピーすることによってライブラリを更新していた。  
 npmレジストリは、各ライブラリを`.tgz`ファイルとして圧縮した上でダウンロードができるようにしている。  
