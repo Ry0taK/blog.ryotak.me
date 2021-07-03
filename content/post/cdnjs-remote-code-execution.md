@@ -49,24 +49,26 @@ GitHubのリポジトリ上でライブラリの情報を管理している事�
 - [cdnjs/cdnjs](https://github.com/cdnjs/cdnjs): ライブラリの実際のファイル群を格納
 - [cdnjs/logs](https://github.com/cdnjs/logs): ライブラリの更新ログを格納
 - [cdnjs/SRIs](https://github.com/cdnjs/SRIs): 各ライブラリのSRI(Subresource Integrity)を格納
-- [cdnjs/static-website](https://github.com/cdnjs/static-website):cdnjs.comのソースコード
-- [cdnjs/origin-worker](https://github.com/cdnjs/origin-worker):cdnjs.cloudflare.comのオリジン用Cloudflare Worker
-- [cdnjs/tools](https://github.com/cdnjs/tools):cdnjsの管理用ツール
-- [cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible):cdnjsの自動ライブラリ更新用システムのAnsible
+- [cdnjs/static-website](https://github.com/cdnjs/static-website): cdnjs.comのソースコード
+- [cdnjs/origin-worker](https://github.com/cdnjs/origin-worker): cdnjs.cloudflare.comのオリジン用Cloudflare Worker
+- [cdnjs/tools](https://github.com/cdnjs/tools): cdnjsの管理用ツール
+- [cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible): cdnjsの自動ライブラリ更新用システムのAnsible
 
 これらのリポジトリから分かるように、cdnjsのインフラの大部分はこのGitHub Organizationに集約されている。  
 その中で、[cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible)と[cdnjs/tools](https://github.com/cdnjs/tools)に興味を惹かれた。  
-この2つのリポジトリのコードを読んだ所、[cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible)が定期的に[cdnjs/tools](https://github.com/cdnjs/tools/tree/b6833e08108b2a06b3b3e5f212d604b5951ff924)の`autoupdate`コマンドを実行し、[cdnjs/packages](https://github.com/cdnjs/packages)内で定義されたGitHubリポジトリ/npmパッケージを用いて更新を確認していることがわかった。  
+この2つのリポジトリのコードを読んだ所、[cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible)が定期的に[cdnjs/tools](https://github.com/cdnjs/tools/tree/b6833e08108b2a06b3b3e5f212d604b5951ff924)の`autoupdate`コマンドをライブラリ更新用サーバー内で実行し、[cdnjs/packages](https://github.com/cdnjs/packages)において指定されているGitHubリポジトリ/npmパッケージを用いて更新を確認していることがわかった。  
 
 ## 自動更新機能の調査
 
-これらの自動更新機能は、ユーザーが管理するGitHubリポジトリ/npmリポジトリをダウンロードし、対象のファイルをコピーすることによってライブラリを更新していた。  
+この自動更新機能は、ユーザーが管理するGitHubリポジトリ/npmリポジトリをダウンロードし、対象のファイルをコピーすることによってライブラリを更新していた。  
 npmレジストリは、各ライブラリを`.tgz`ファイルとして圧縮した上でダウンロードができるようにしている。  
 この自動更新用のツールがGoで記述されていることから、Goの`compress/gzip`及び`archive/tar`を用いて解凍しているのではないかと推測した。  
 Goの`archive/tar`はアーカイブ内に含まれるファイルパスをサニタイズせずに返す[^3]ため、もし仮に`archive/tar`から返されたファイル名を元にしてディスク上に書き込んでいる場合、`../../../../../../../../../tmp/test`のようなファイル名を`.tgz`ファイルに含めることにより、任意のファイルを上書きできる。  
 [cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible)の情報から、いくつかのスクリプトが定期的に実行されており、それらに対して書き込み権限があることがわかっていたため、パストラバーサルを介したファイルの上書きを重点的に確認することにした。
 
 [^3]: https://github.com/golang/go/issues/25849
+
+![パストラバーサルを行うために細工したtgzファイルの画像](/img/cdnjs-tgz-slip.png)
 
 ## パストラバーサル
 パストラバーサルを探すために、`autoupdate`コマンドの`main`関数を読み始めた。
@@ -85,7 +87,6 @@ func main() {
 				newVersionsToCommit, allVersions = updateGit(ctx, pckg)
 			}
 		[...]
-	}
 }
 ```
 
@@ -93,30 +94,13 @@ func main() {
 
 ```go
 func updateNpm(ctx context.Context, pckg *packages.Package) ([]newVersionToCommit, []version) {
-	[...]
-	if lastExistingVersion != nil {
-		util.Debugf(ctx, "last existing version: %s\n", lastExistingVersion.Version)
-
-		versionDiff := npmVersionDiff(npmVersions, existingVersionSet)
-		sort.Sort(npm.ByTimeStamp(versionDiff))
-
-		newNpmVersions := make([]npm.Version, 0)
-
-		for i := len(versionDiff) - 1; i >= 0; i-- {
-			v := versionDiff[i]
-			if v.TimeStamp.After(lastExistingVersion.TimeStamp) {
-				newNpmVersions = append(newNpmVersions, v)
-			}
-		}
-
-		sort.Sort(sort.Reverse(npm.ByTimeStamp(npmVersions)))
-
+		[...]
 		newVersionsToCommit = doUpdateNpm(ctx, pckg, newNpmVersions)
         [...]
 }
 ```
 
-そして、新しいバージョンが存在する場合は`updateNpm`から`doUpdateNpm`関数を呼び出す。  
+そして、新しいライブラリバージョンの情報と共に`doUpdateNpm`関数を呼び出す。  
 
 ```go
 func doUpdateNpm(ctx context.Context, pckg *packages.Package, versions []npm.Version) []newVersionToCommit {
@@ -128,7 +112,7 @@ func doUpdateNpm(ctx context.Context, pckg *packages.Package, versions []npm.Ver
         [...]
 }
 ```
-次に、`npm.DownloadTar`関数へ`.tgz`のURLを渡す。  
+次に、`npm.DownloadTar`関数へ新しいバージョンの`.tgz`ファイルのURLを渡す。  
 
 ```go
 func DownloadTar(ctx context.Context, url string) string {
@@ -188,18 +172,17 @@ func Untar(dst string, r io.Reader) error {
 
 ## 脆弱性のデモンストレーション
 CloudflareはHackerOne上に脆弱性開示制度を持っているため、脆弱性が実際に攻撃可能であることを示さなければ、HackerOneのトリアージチームがCloudflare側にレポートを転送しない可能性が高い。  
-そのため、脆弱性が実際に攻撃出来ることを示すためにデモを行うことにした。  
-攻撃手順としては、以下のとおりとした。
+そのため、脆弱性が実際に攻撃出来ることを示すためにデモンストレーションを行うことにした。  
+攻撃手順としては、以下のとおりとなる。
 1. cdnjsに登録されたnpmパッケージで細工したファイル名を含む`.tgz`ファイルを使用して新しいバージョンを公開する。
 2. cdnjsの自動更新サーバーがファイルを処理するのを待つ。
 3. 細工した`.tgz`ファイルの中身が定期実行されているスクリプトファイルへと書き込まれ、任意のコードが実行される。
 
-...と、ここまで考えた所でGitリポジトリをベースとした自動更新機能が気になった。  
-そのため、脆弱性のデモンストレーションを行う前にコードを流し読みした所、シンボリックリンクの存在が考慮されていないように見受けられた。  
-Gitはシンボリックリンクをそのまま扱うことが可能なため、Gitリポジトリにシンボリックリンクを含め、cdnjsに処理させることによりcdnjsシステム上の任意のファイルを読み取れる可能性があった。  
+...と、ここまで考えた所でGitリポジトリをベースとした自動更新機能が気になってきた。  
+そのため、脆弱性のデモンストレーションを行う前にコードを流し読みした所、Gitリポジトリからファイルをコピーする際に、シンボリックリンクの存在が考慮されていないように見受けられた。  
+Gitはシンボリックリンクを扱うことが可能なため、Gitリポジトリにシンボリックリンクを含め、cdnjsに処理させることによりcdnjsシステム上の任意のファイルを読み取れる可能性がある。  
 
-ファイルを上書きして任意のコードを実行するように書き換えた場合、自動更新機能に障害が発生してしまう可能性がある。  
-それを考慮し、シンボリックリンクによる任意ファイル読み取りを先に報告し、パストラバーサルに関してはそのレポート内でデモンストレーションを行おうと考えた。  
+ファイルを上書きして任意のコードを実行するように書き換えた場合、自動更新機能に障害が発生してしまう可能性があったため、シンボリックリンクによる任意ファイル読み取りを先に検証し、パストラバーサルに関してはそのレポート内でデモンストレーションを行おうと考えた。  
 これに伴い、攻撃手順を以下のように変更した。  
 1. cdnjsに登録されたGitHubリポジトリに、無害なファイル(ここでは`/proc/self/cmdline`を想定)へとリンクさせたシンボリックリンクを追加する。
 2. 当該のGitHubリポジトリ上で、新しいバージョンを公開する。
@@ -225,7 +208,7 @@ ln -s /proc/self/cmdline test.js
 
 この時点ではとても焦っており確認していなかったのだが、実はレポートを送信する前にこれらのトークンは無効化されていた。  
 これは後からわかったことなのだが、`GITHUB_REPO_API_KEY`(GitHubのAPIキー)が含まれていたことにより、即座にGitHubが自動で通知を行い、それを受け取ったCloudflareはインシデントレスポンスを開始していたらしい。  
-cdnjsが細工されたパッケージを処理してから数分も立たない内に各種認証情報の無効化を行ったらしく、流石Cloudflareという印象を受けた。  
+cdnjsが細工されたパッケージを処理してから数分も立たない内に各種認証情報の無効化を行っていたらしく、流石Cloudflareという印象を受けた。  
 
 ## 事後処理
 その後、詳細な影響範囲の調査を行った。  
@@ -237,7 +220,7 @@ cdnjsが細工されたパッケージを処理してから数分も立たない
 ## まとめ
 今回の記事では、cdnjsに存在した脆弱性について解説しました。  
 脆弱性自体は特殊なスキル無しで悪用可能なものでしたが、それによって潜在的に生じる影響が非常に大きいものでした。    
-世の中にはこの脆弱性にような、悪用可能性に対して影響が見合っていない物が多数あると考えると、非常に恐ろしいものだと感じます。  
+世の中にはこの脆弱性のような、悪用の容易さに対して影響が見合っていない物が多数あると考えると、非常に恐ろしいものだと感じます。  
 本記事に関する質問はTwitter([@ryotkak](https://twitter.com/ryotkak))へメッセージを投げてください。
 ## タイムライン
 |日付 (日本時間)|出来事|
