@@ -8,7 +8,7 @@ tags: ["cdnjs", "Vulnerability", "Go", "Supply Chain", "RCE"]
 ## Preface
 
 Cloudflare, which runs cdnjs, is running a "Vulnerability Disclosure Program" on HackerOne, which allows hackers to perform the vulnerability assessment.  
-This article describes a vulnerability reported through this program, and published by with the permission of the Cloudflare security team. So this aritcle is not intended to recommend you to perform an unauthorized vulnerability assessment.  
+This article describes a vulnerability reported through this program, and published with the permission of the Cloudflare security team. So this aritcle is not intended to recommend you to perform an unauthorized vulnerability assessment.  
 If you found any vulnerabilities in Cloudflare's product, please report it to [Cloudflare's vulnerability disclosure program](https://hackerone.com/cloudflare).
 
 ## TL;DR
@@ -32,7 +32,7 @@ This is the second most widely used library CDN after 12.8%[^2] of Google Hosted
 ## Reason for investigation
 
 A few weeks before my last investigation into "[Remote code execution in Homebrew by compromising the official Cask repository](http://localhost:19191/post/homebrew-security-incident-en/)", I was investigating supply chain attacks.  
-While finding a service that many software depends on, and is allowing a user to perform the vulnerability assessment, I found cdnjs. So I decided to investigate it.  
+While finding a service that many software depends on, and is allowing users to perform the vulnerability assessment, I found cdnjs. So I decided to investigate it.  
 
 ## Initial investigation
 
@@ -60,18 +60,18 @@ After reading codes of these 2 repositories, it turned out [cdnjs/bot-ansible](h
 
 ## Investigation of automatic update
 
-この自動更新機能は、ユーザーが管理するGitHubリポジトリ/npmリポジトリをダウンロードし、対象のファイルをコピーすることによってライブラリを更新していた。  
-npmレジストリは、各ライブラリを`.tgz`ファイルとして圧縮した上でダウンロードができるようにしている。  
-この自動更新用のツールがGoで記述されていることから、Goの`compress/gzip`及び`archive/tar`を用いて解凍しているのではないかと推測した。  
-Goの`archive/tar`はアーカイブ内に含まれるファイルパスをサニタイズせずに返す[^3]ため、もし仮に`archive/tar`から返されたファイル名を元にしてディスク上に書き込んでいる場合、`../../../../../../../../../tmp/test`のようなファイル名を`.tgz`ファイルに含めることにより、任意のファイルを上書きできる。  
-[cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible)の情報から、いくつかのスクリプトが定期的に実行されており、それらに対して書き込み権限があることがわかっていたため、パストラバーサルを介したファイルの上書きを重点的に確認することにした。
+The automatic update function updates the library by downloading the user-managed GitHub repository / npm repository and copying the target file from them.  
+npm registry compress libraries into `.tgz` to make it downloadable.  
+Since the tool for this automatic update is written in Go, I guessed that it may use Go's `compress/gzip` and `archive/tar` to extract archive.  
+Go's `archive/tar` returns the file path contained in the archive without sanitizing, so if the archive is extracted into the disk based on the filename returned from `archive/tar`, archives that contains file names like `../../../../../../../tmp/test` may overwrite arbitrary files on the system.  
+From the information in [cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible), I knew that some scripts were running regularly and the user that runs `autoupdate` command had write permission for them, so I focused on overwriting files via path traversal.  
 
 [^3]: https://github.com/golang/go/issues/25849
 
-![パストラバーサルを行うために細工したtgzファイルの画像](/img/cdnjs-tgz-slip.png)
+![Image of crafted tgz file to perform path traversal](/img/cdnjs-tgz-slip.png)
 
-## パストラバーサル
-パストラバーサルを探すために、`autoupdate`コマンドの`main`関数を読み始めた。
+## Path traversal
+To find path traversal, I started reading `main` function of `autoupdate` command.  
 ```go
 func main() {
         [...]	
@@ -90,7 +90,7 @@ func main() {
 }
 ```
 
-上記のコードから分かるように、`npm`をベースとした自動更新が指定されていた場合は、`updateNpm`関数へとパッケージ情報を渡している。  
+As you can see from the code snippet above, if `npm` is specified as a source of auto update, it passes package information to `updateNpm` function.  
 
 ```go
 func updateNpm(ctx context.Context, pckg *packages.Package) ([]newVersionToCommit, []version) {
@@ -100,7 +100,7 @@ func updateNpm(ctx context.Context, pckg *packages.Package) ([]newVersionToCommi
 }
 ```
 
-そして、新しいライブラリバージョンの情報と共に`doUpdateNpm`関数を呼び出す。  
+Then, it passes information about the new library version to `doUpdateNpm` function.  
 
 ```go
 func doUpdateNpm(ctx context.Context, pckg *packages.Package, versions []npm.Version) []newVersionToCommit {
@@ -112,7 +112,7 @@ func doUpdateNpm(ctx context.Context, pckg *packages.Package, versions []npm.Ver
         [...]
 }
 ```
-次に、`npm.DownloadTar`関数へ新しいバージョンの`.tgz`ファイルのURLを渡す。  
+And `doUpdateNpm` passes the URL of `.tgz` fiel into `npm.DownloadTar`.    
 
 ```go
 func DownloadTar(ctx context.Context, url string) string {
@@ -130,7 +130,7 @@ func DownloadTar(ctx context.Context, url string) string {
 	return dest
 }
 ```
-最後に、`http.Get`を使用して取得した`.tgz`ファイルを、`Untar`関数へと渡す。  
+Finally, pass the `.tgz` file obtained using `http.Get` to the `Untar` function.  
 
 ```go
 func Untar(dst string, r io.Reader) error {
@@ -165,74 +165,76 @@ func Untar(dst string, r io.Reader) error {
 }
 ```
 
-予想通り、`Untar`関数内において`compress/gzip`と`archive/tar`を使用して解凍を行っていた。  
-最初は`removePackageDir`においてパスのサニタイズを行っているのだと考えていたのだが、関数の内容を確認した所、単純に`package/`という文字列をパスから削除するだけの関数だった。  
-これにより、npmへ公開した`.tgz`ファイルからパストラバーサルを行い、サーバー上で定期的に実行されるスクリプトを上書きした上で任意のコードが実行できるということがわかった。  
+As I guessed, `compress/gzip` and `archive/tar` were used in `Untar` function to extract `.tgz` file.  
+At first I thought that it's sanitizing the path in `removePackageDir` function, but when I checked the contents of the function, I noticed that it's just removing the string `package/` from the path.  
+From these code snippets, I confirmed that arbitrary code can be executed after performing path traversal from the `.tgz` file published to npm and overwriting the script that is executed regularly on the server.  
 
 
-## 脆弱性のデモンストレーション
-CloudflareはHackerOne上に脆弱性開示制度を持っているため、脆弱性が実際に攻撃可能であることを示さなければ、HackerOneのトリアージチームがCloudflare側にレポートを転送しない可能性が高い。  
-そのため、脆弱性が実際に攻撃出来ることを示すためにデモンストレーションを行うことにした。  
-攻撃手順としては、以下のとおりとなる。
-1. cdnjsに登録されたnpmパッケージで細工したファイル名を含む`.tgz`ファイルを使用して新しいバージョンを公開する。
-2. cdnjsの自動更新サーバーがファイルを処理するのを待つ。
-3. 細工した`.tgz`ファイルの中身が定期実行されているスクリプトファイルへと書き込まれ、任意のコードが実行される。
+## Demonstration of vulnerability
+Because Cloudflare is running a vulnerability disclosure program on HackerOne, it's likely that HackerOne's triage team won't forward the report to Cloudflare unless it indicates that the vulnerability is actually attackable.    
+Therefore, I decided to do a demonstration to show that the vulnerability can actually be attacked.  
 
-...と、ここまで考えた所でGitリポジトリをベースとした自動更新機能が気になってきた。  
-そのため、脆弱性のデモンストレーションを行う前にコードを流し読みした所、Gitリポジトリからファイルをコピーする際に、シンボリックリンクの存在が考慮されていないように見受けられた。  
-Gitはシンボリックリンクを扱うことが可能なため、Gitリポジトリにシンボリックリンクを含め、cdnjsに処理させることによりcdnjsシステム上の任意のファイルを読み取れる可能性がある。  
+The attack procedure is as follows.
+1. Publish `.tgz` file that contains crafted filename to the npm registry.
+2. Wait for cdnjs library update server to process the crafted `.tgz` file.
+3. The contents of the file that is published in step 1 are written into a regularly executed script file and arbitrary command is executed.
 
-ファイルを上書きして任意のコードを実行するように書き換えた場合、自動更新機能に障害が発生してしまう可能性があったため、シンボリックリンクによる任意ファイル読み取りを先に検証し、パストラバーサルに関してはそのレポート内でデモンストレーションを行おうと考えた。  
-これに伴い、攻撃手順を以下のように変更した。  
-1. cdnjsに登録されたGitHubリポジトリに、無害なファイル(ここでは`/proc/self/cmdline`を想定)へとリンクさせたシンボリックリンクを追加する。
-2. 当該のGitHubリポジトリ上で、新しいバージョンを公開する。
-3. cdnjsの自動更新サーバーがファイルを処理するのを待つ。
-4. 指定したファイルが読み取られ、公開される。
+... and then, for some reasons, I started wondering how automatic updates based on the Git repository works.  
+So, I read codes a bit before demonstrating the vulnerability, and it seemed that the symlinks aren't considered when copying files from the Git repository.  
+As Git supports symbolic links by default, it may be possible to read arbitrary files from cdnjs library update server by adding symlink into the Git repository.  
 
-この時点で20時頃だったのだが、シンボリックリンクを作成するだけであれば直ぐに済ませられると考え、シンボリックリンクを作成してから夕飯を食べることにした。[^4]  
+If the file is overwritten to execute arbitrary command, the automatic update function may be broken, so I decided to check the arbitrary file reading first.  
+And for path traversal, I can tell them in the report of arbitrary file reading that I'm going to overwrite the script files.  
+Along with this, the attack procedure was changed as follows.  
+1. Add a symbolic link that points harmless file (Assumed `/proc/self/maps` here) into the Git repository.
+2. Publish new version in the repository.
+2. Wait for cdnjs library update server to process the crafted repository.
+4. The specified file is published in cdnjs.
+
+It was around 20:00 at this point, but what I have to do was creating symlink, so I decided to eat dinner after making the symbolic link and publishing it.[^4]  
 ```bash
-ln -s /proc/self/cmdline test.js
+ln -s /proc/self/maps test.js
 ```
 
-[^4]: 記憶が定かではないが、この日の夕食は冷凍餃子だったと記憶している。
+[^4]: I don't know if this is correct, but I remember that the dinner on that day was frozen gyoza (dumplings). (It was yummy!)  
 
-## インシデント
-夕飯を済ませ、PCの前に戻ってきた所、cdnjsがシンボリックリンクを含むバージョンを公開していることが確認できた。  
-その後、レポートを送信するためにファイル内容を確認して驚愕した。  
-なんと、`GITHUB_REPO_API_KEY`や、`WORKERS_KV_API_TOKEN`といった明らかに機微な情報が表示されていたのである。  
-一瞬何が起こったのか理解できず、コマンドのログを確かめた所、誤って`/proc/self/cmdline`ではなく`/proc/self/environ`へのリンクを貼っていたことが確認できた。[^5]  
-先述の通り、cdnjsのGitHub Organizationが侵害された場合、cdnjsの大部分を侵害することが可能となる。  
-すぐにでも対応する必要があったため、レポートには現在の状況がわかるリンクとトークン類を全て取り消して欲しいという旨のみを記載し、送信した。  
+## Incident
+Once I finished the dinner and returning to my PC desk, I was able to confirm that cdnjs has released a version containing symbolic links.    
+After checking the contents of the file to send report, I was surprised.  
+Surprisingly, clearly sensitive information such as `GITHUB_REPO_API_KEY` and `WORKERS_KV_API_TOKEN` was displayed.  
+I couldn't understand what happened for a moment, and when I checked the command log, I found that I accidentally put a link to `/proc/self/environ` instead of `/proc/self/maps`. [^5]
+As mentioned earlier, if cdnjs' GitHub Organization is compromised, it's possible to compromise most of cdnjs infrastructure.  
+I needed to take immediate action, so I sent the report that only contains link that shows the current situation, and requested them to revoke all credentails.  
 
-[^5]: 仕事で疲れていたのと、空腹だった事が重なり、ろくに確認もせずに補完されたコマンドを実行してしまっていた。
+[^5]: Because I was tired from work and I was hungry, I ran the command completed by shell without any confirmation.
 
-この時点ではとても焦っており確認していなかったのだが、実はレポートを送信する前にこれらのトークンは無効化されていた。  
-これは後からわかったことなのだが、`GITHUB_REPO_API_KEY`(GitHubのAPIキー)が含まれていたことにより、即座にGitHubが自動で通知を行い、それを受け取ったCloudflareはインシデントレスポンスを開始していたらしい。  
-cdnjsが細工されたパッケージを処理してから数分も立たない内に各種認証情報の無効化を行っていたらしく、流石Cloudflareという印象を受けた。  
+At this point I was very confused and hadn't confirmed it, but in fact these tokens were invalidated before I sent the report.  
+It seems that GitHub automatically notified immediately because `GITHUB_REPO_API_KEY` (API key of GitHub) was included in the repository, and Cloudflare started incident response immediatialy after the notification.  
+I felt that they're great security team because they invalidated all credentials within minutes after cdnjs processed the specially crafted repository.  
 
-## 事後処理
-その後、詳細な影響範囲の調査を行った。  
-`GITHUB_REPO_API_KEY`はcdnjsのGitHub Organizationに所属している[robocdnjs](https://github.com/robocdnjs)というアカウントのアクセストークンであり、cdnjsの各リポジトリに対する書き込み権限を持っていた。  
-つまり、cdnjs上でホストされている任意のライブラリの改竄や、ウェブサイトの改竄などをこのトークンを用いて行うことができた。  
-また、`WORKERS_KV_API_TOKEN`は、cdnjsに使用されているCloudflare WorkersのKVに対する書き込み権限を持っており、KVにキャッシュされたライブラリ情報を改竄することが可能だった。  
-これらの権限を組み合わせることにより、cdnjsのオリジンデータからKVキャッシュ、更にはcdnjsのウェブサイトといったcdnjsのコア部分を完全に侵害することができたと考えられる。  
+## Post processing
+After the incident, I investigated what could be impacted.  
+`GITHUB_REPO_API_KEY` was an API key for [robocdnjs](https://github.com/robocdnjs), which belongs to [cdnjs](https://github.com/cdnjs) organization, and had write permission against each repositories.  
+Which means it was possible to tamper arbitrary libraries on the cdnjs, or tamper the cdnjs.com itself.  
+Also, `WORKERS_KV_API_TOKEN` had a permission against KV of Cloudflare Workers that is used in the cdnjs, it could be used to tamper the libraries on KV cache, too.  
+By combining these permissions, the core part of cdnjs, such as the origin data of cdnjs, the KV cache, and even the cdnjs website, could be completely tampered.    
 
-## まとめ
-今回の記事では、cdnjsに存在した脆弱性について解説しました。  
-脆弱性自体は特殊なスキル無しで悪用可能なものでしたが、それによって潜在的に生じる影響が非常に大きいものでした。    
-世の中にはこの脆弱性のような、悪用の容易さに対して影響が見合っていない物が多数あると考えると、非常に恐ろしいものだと感じます。  
-本記事に関する質問はTwitter([@ryotkak](https://twitter.com/ryotkak))へメッセージを投げてください。
-## タイムライン
-|日付 (日本時間)|出来事|
+## Conclusion
+In this article, I described the vulnerability that was existed in cdjs.  
+While this vulnerability could be exploited without any special skills, it could impact many websites.  
+Considering that there are many vulnerabilities in the world, such as this one, which are easy to exploit but have a very large impact, I feel that it's very scary.  
+If you have any questions/comments about this article, please send a message to ([@ryotkak](https://twitter.com/ryotkak)) on Twitter.  
+## Timeline
+|Date (JST)|Event|
 |----|----|
-|2021/04/06 19時頃|脆弱性の発見、検証開始|
-|2021/04/06 20時頃|デモンストレーション用のファイルを公開|
-|2021/04/06 20時半頃|cdnjsがファイルを処理|
-|同時刻|GitHubがアラートをCloudflareへ送信|
-|同時刻|Cloudflare内部でインシデントレスポンスが始まる|
-|数分以内|各種認証情報の取り消しが完了する|
-|2021/04/06 20時40分頃|初期レポートを送信|
-|2021/04/06 21時頃|詳細なレポートを送信|
-|2021/04/07～|二次対応が完了|
-|2021/06/03|完全な対応が完了|
-|2021/07/XX|本記事の開示|
+|April 6, 2021 19:00|Found a vulnerability|
+|April 6, 2021 20:00|Published a crafted symlink|
+|April 6, 2021 20:30|cdnjs processed the file|
+|At the same time|GitHub sent an alert to Cloudflare|
+|At the same time|Cloudflare started an incident response|
+|Within minutes|Cloudflare finished revokation of credentials|
+|April 6, 2021 20:40|I sent an initial report|
+|April 6, 2021 21:00|I sent detailed report|
+|April 7, 2021-|Secondary fix has applied |
+|June 3, 2021|Complete fix has applied|
+|July XX, 2021|Published this article|
