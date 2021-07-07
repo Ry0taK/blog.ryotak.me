@@ -7,15 +7,18 @@ tags: ["cdnjs", "Vulnerability", "Go", "Supply Chain", "RCE"]
 
 ## Preface
 
+([日本語版](/post/cdnjs-remote-code-execution)も公開されています。)  
+
 Cloudflare, which runs cdnjs, is running a "Vulnerability Disclosure Program" on HackerOne, which allows hackers to perform vulnerability assessments.  
-This article describes a vulnerability reported through this program and published with the permission of the Cloudflare security team. So this article is not intended to recommend you to perform an unauthorized vulnerability assessment.  
+This article describes vulnerabilities reported through this program and published with the permission of the Cloudflare security team.  
+So this article is not intended to recommend you to perform an unauthorized vulnerability assessment.  
 If you found any vulnerabilities in Cloudflare's product, please report it to [Cloudflare's vulnerability disclosure program](https://hackerone.com/cloudflare).
 
 ## TL;DR
 There was a vulnerability in the cdnjs library update server that could execute arbitrary commands, and as a result, cdnjs could be completely compromised.  
-This allows an attacker to tamper 12.6%[^1] of all websites on the internet.  
+This allows an attacker to tamper 12.6%[^1] of all websites on the internet once caches are expired.  
 
-[^1]: Quoted from [W3Techs](https://w3techs.com/technologies/details/cd-cdnjs) as of 2 July 2021. Due to the presence of SRI, fewer websites could tamper immediately.  
+[^1]: Quoted from [W3Techs](https://w3techs.com/technologies/details/cd-cdnjs) as of 2 July 2021. Due to the presence of SRI / cache, fewer websites could tamper immediately.  
 
 ## About cdnjs
 
@@ -31,7 +34,7 @@ This is the second most widely used library CDN after 12.8%[^2] of [Google Hoste
 
 ## Reason for investigation
 
-A few weeks before my last investigation into "[Remote code execution in Homebrew by compromising the official Cask repository](http://localhost:19191/post/homebrew-security-incident-en/)", I was investigating supply chain attacks.  
+A few weeks before my last investigation into "[Remote code execution in Homebrew by compromising the official Cask repository](/post/homebrew-security-incident-en/)", I was investigating supply chain attacks.  
 While finding a service that many software depends on, and is allowing users to perform the vulnerability assessment, I found cdnjs. So I decided to investigate it.  
 
 ## Initial investigation
@@ -56,17 +59,18 @@ As a result, it was found that the repository is used in the following ways.
 
 As you can see from these repositories, most of the cdnjs infrastructure is centralized in this GitHub Organization.  
 I was interested in [cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible) and [cdnjs/tools](https://github.com/cdnjs/tools) because it automates library updates.  
-After reading codes of these 2 repositories, it turned out [cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible) executes `autoupdate` command of [cdnjs/tools](https://github.com/cdnjs/tools/tree/b6833e08108b2a06b3b3e5f212d604b5951ff924) in the cdnjs library update server periodically, to check updates of library from [cdnjs/packages](https://github.com/cdnjs/packages) by downloading npm package / Git repository of libraries.  
+After reading codes of these 2 repositories, it turned out [cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible) executes `autoupdate` command of [cdnjs/tools](https://github.com/cdnjs/tools/tree/b6833e08108b2a06b3b3e5f212d604b5951ff924) in the cdnjs library update server periodically, to check updates of library from [cdnjs/packages](https://github.com/cdnjs/packages) by downloading npm package / Git repository.  
 
 ## Investigation of automatic update
 
-The automatic update function updates the library by downloading the user-managed Git repository / npm repository and copying the target file from them.  
+The automatic update function updates the library by downloading the user-managed Git repository / npm package and copying the target file from them.  
 npm registry compress libraries into `.tgz` to make it downloadable.  
 Since the tool for this automatic update is written in Go, I guessed that it may use Go's `compress/gzip` and `archive/tar` to extract the archive file.  
-Go's `archive/tar` returns the file path contained in the archive without sanitizing[^3], so if the archive is extracted into the disk based on the filename returned from `archive/tar`, archives that contain file path like `../../../../../../../tmp/test` may overwrite arbitrary files on the system.  
+Go's `archive/tar` returns the filename contained in the archive without sanitizing[^3], so if the archive is extracted into the disk based on the filename returned from `archive/tar`, archives that contain filename like `../../../../../../../tmp/test` may overwrite arbitrary files on the system. [^4]  
 From the information in [cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible), I knew that some scripts were running regularly and the user that runs the `autoupdate` command had write permission for them, so I focused on overwriting files via path traversal.  
 
 [^3]: https://github.com/golang/go/issues/25849
+[^4]: Archives like this can be created by using tools such as [evilarc](https://github.com/ptoomey3/evilarc).
 
 ![Image of crafted tgz file to perform path traversal](/img/cdnjs-tgz-slip.png)
 
@@ -190,22 +194,22 @@ Along with this, the attack procedure was changed as follows.
 2. Wait for the cdnjs library update server to process the crafted repository.
 4. The specified file is published on cdnjs.
 
-It was around 20:00 at this point, but what I have to do was creating a symlink, so I decided to eat dinner after making the symbolic link and publishing it.[^4]  
+It was around 20:00 at this point, but what I have to do was creating a symlink, so I decided to eat dinner after making the symbolic link and publishing it.[^5]  
 ```bash
 ln -s /proc/self/maps test.js
 ```
 
-[^4]: I don't know if this is correct, but I remember that the dinner on that day was frozen gyoza (dumplings). (It was yummy!)  
+[^5]: I don't know if this is correct, but I remember that the dinner on that day was frozen gyoza (dumplings). (It was yummy!)  
 
 ## Incident
 Once I finished the dinner and returning to my PC desk, I was able to confirm that cdnjs has released a version containing symbolic links.    
 After checking the contents of the file to send the report, I was surprised.  
 Surprisingly, clearly sensitive information such as `GITHUB_REPO_API_KEY` and `WORKERS_KV_API_TOKEN` was displayed.  
-I couldn't understand what happened for a moment, and when I checked the command log, I found that I accidentally put a link to `/proc/self/environ` instead of `/proc/self/maps`.[^5]  
+I couldn't understand what happened for a moment, and when I checked the command log, I found that I accidentally put a link to `/proc/self/environ` instead of `/proc/self/maps`.[^6]  
 As mentioned earlier, if cdnjs' GitHub Organization is compromised, it's possible to compromise most of the cdnjs infrastructure.  
 I needed to take immediate action, so I sent the report that only contains a link that shows the current situation, and requested them to revoke all credentials.  
 
-[^5]: Because I was tired from work and I was hungry, I ran the command completed by shell without any confirmation.
+[^6]: Because I was tired from work and I was hungry, I ran the command completed by shell without any confirmation.
 
 At this point, I was very confused and hadn't confirmed it, but in fact, these tokens were invalidated before I sent the report.  
 It seems that GitHub automatically notified immediately because `GITHUB_REPO_API_KEY` (API key of GitHub) was included in the repository, and Cloudflare started incident response immediately after the notification.  
@@ -215,14 +219,14 @@ I felt that they're a great security team because they invalidated all credentia
 After the incident, I investigated what could be impacted.  
 `GITHUB_REPO_API_KEY` was an API key for [robocdnjs](https://github.com/robocdnjs), which belongs to [cdnjs](https://github.com/cdnjs) organization, and had write permission against each repository.  
 This means it was possible to tamper arbitrary libraries on the cdnjs or tamper the cdnjs.com itself.  
-Also, `WORKERS_KV_API_TOKEN` had permission against KV of Cloudflare Workers that is used in the cdnjs, it could be used to tamper the libraries on KV cache, too.  
+Also, `WORKERS_KV_API_TOKEN` had permission against KV of Cloudflare Workers that is used in the cdnjs, it could be used to tamper the libraries on KV cache.  
 By combining these permissions, the core part of cdnjs, such as the origin data of cdnjs, the KV cache, and even the cdnjs website, could be completely tampered.    
 
 ## Conclusion
 In this article, I described the vulnerability that was existed in cdnjs.  
 While this vulnerability could be exploited without any special skills, it could impact many websites.  
 Given that there are many vulnerabilities in the supply chain, which are easy to exploit but have a very large impact, I feel that it's very scary.  
-If you have any questions/comments about this article, please send a message to ([@ryotkak](https://twitter.com/ryotkak)) on Twitter.  
+If you have any questions/comments about this article, please send a message to [@ryotkak](https://twitter.com/ryotkak) on Twitter.  
 ## Timeline
 |Date (JST)|Event|
 |----|----|
