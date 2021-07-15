@@ -1,0 +1,138 @@
+<!doctype html><html lang=ja><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,shrink-to-fit=no"><meta name=HandheldFriendly content="True"><meta http-equiv=x-ua-compatible content="IE=edge"><meta http-equiv=cache-control content="no-transform"><meta http-equiv=cache-control content="no-siteapp"><meta name=generator content="Hugo 0.80.0"><link rel=apple-touch-icon sizes=180x180 href=/apple-touch-icon.png><link rel=icon type=image/png sizes=32x32 href=/favicon-32x32.png><link rel=icon type=image/png sizes=16x16 href=/favicon-16x16.png><link rel=manifest href=/site.webmanifest><meta name=msapplication-TileColor content="#da532c"><meta name=theme-color content="#ffffff"><title>Cloudflareのcdnjsにおける任意コード実行 - RyotaK's Blog</title><meta name=author content="RyotaK"><meta name=description content="技術的な話とか"><meta name=keywords content="cdnjs,脆弱性,Go,Supply Chain,RCE"><meta property="og:title" content="Cloudflareのcdnjsにおける任意コード実行"><meta name=twitter:title content="Cloudflareのcdnjsにおける任意コード実行"><meta property="og:type" content="article"><meta property="og:url" content="https://blog.ryotak.me/post/cdnjs-remote-code-execution/"><meta property="og:description" content="はじめに (English version is also available.) cdnjsの運営元であるCloudflareは、HackerOne上で脆弱性開示制度(Vulnerability Disclosure Program)を設けており、脆弱性の診断行為を許可しています。 本記"><meta name=twitter:description content="はじめに (English version is also available.) cdnjsの運営元であるCloudflareは、HackerOne上で脆弱性開示制度(Vulnerability Disclosure Program)を設けており、脆弱性の診断行為を許可しています。 本記"><meta name=twitter:card content="summary"><meta property="article:published_time" content="2021-07-16T08:30:00+09:00"><meta property="article:modified_time" content="2021-07-16T08:30:00+09:00"><link rel=stylesheet href=https://blog.ryotak.me/assets/css/fuji.min.css></head><body data-theme=dark data-theme-auto=false><script data-cfasync=false>var fujiThemeData=localStorage.getItem('fuji_data-theme');if(!fujiThemeData){localStorage.setItem('fuji_data-theme','auto');}else{if(fujiThemeData!=='auto'){document.body.setAttribute('data-theme',fujiThemeData==='dark'?'dark':'light');}}</script><header><div class="container-lg clearfix"><div class="col-12 header"><a class=title-main href=https://blog.ryotak.me>RyotaK's Blog</a>
+<span class=title-sub>技術的な話とか</span></div></div></header><main><div class="container-lg clearfix"><div class="col-12 col-md-9 float-left content"><article><h2 class="post-item post-title"><a href=https://blog.ryotak.me/post/cdnjs-remote-code-execution/>Cloudflareのcdnjsにおける任意コード実行</a></h2><div class="post-item post-meta"><span><i class="iconfont icon-today-sharp"></i>&nbsp;2021-07-16</span>
+<span><i class="iconfont icon-file-tray-sharp"></i>&nbsp;5323 字</span>
+<span><i class="iconfont icon-pricetags-sharp"></i>&nbsp;<a href=/tags/cdnjs>cdnjs</a>&nbsp;<a href=/tags/%E8%84%86%E5%BC%B1%E6%80%A7>脆弱性</a>&nbsp;<a href=/tags/go>Go</a>&nbsp;<a href=/tags/supply-chain>Supply Chain</a>&nbsp;<a href=/tags/rce>RCE</a>&nbsp;</span></div><div class="post-content markdown-body"><h2 id=はじめに>はじめに</h2><p>(<a href=/post/cdnjs-remote-code-execution-en>English version</a> is also available.)</p><p>cdnjsの運営元であるCloudflareは、HackerOne上で脆弱性開示制度(Vulnerability Disclosure Program)を設けており、脆弱性の診断行為を許可しています。<br>本記事は、当該制度を通して報告された脆弱性をCloudflareセキュリティチームの許可を得た上で公開しているものであり、無許可の脆弱性診断行為を推奨することを意図したものではありません。<br>Cloudflareが提供する製品に脆弱性を発見した場合は、<a href=https://hackerone.com/cloudflare target=_blank>Cloudflareの脆弱性開示制度</a>へ報告してください。</p><h2 id=要約>要約</h2><p>cdnjsのライブラリ更新用サーバーに任意のコードを実行することが可能な脆弱性が存在し、結果としてcdnjsを完全に侵害することが出来る状態だった。<br>これにより、インターネット上のウェブサイトの内12.7%<sup id=fnref:1><a href=#fn:1 class=footnote-ref role=doc-noteref>1</a></sup>を改竄することが可能となっていた。</p><h2 id=cdnjsとは>cdnjsとは</h2><p><a href=https://cdnjs.com target=_blank>cdnjs</a>は、Cloudflareによって運営されている無料のJavaScript/CSSライブラリ用CDNであり、記事公開時点でインターネット上のウェブサイトの12.7%に使用されている。<br>これは、<a href=https://developers.google.com/speed/libraries target=_blank>Google Hosted Libraries</a>の12.8%<sup id=fnref:2><a href=#fn:2 class=footnote-ref role=doc-noteref>2</a></sup>に次いで2番目に広く使われているライブラリ用CDNであり、現在の使用率の推移を鑑みるに、近いうちに最も使われているJavaScriptライブラリ用CDNになると考えられる。</p><div style=text-align:center><img src=/img/cdnjs-usage.png alt=cdnjsのインターネット上での使用率><p>2021年7月15日時点での<a href=https://w3techs.com/technologies/details/cd-cdnjs target=_blank>W3Techs</a>におけるcdnjsの使用率グラフ</p></div><h2 id=調査理由>調査理由</h2><p>前回の「<a href=/post/homebrew-security-incident/>Homebrewにおける任意コード実行</a>」に関する調査を行う数週間前に、サプライチェーン攻撃に関する調査を行っていた。<br>多数のアプリケーションが依存するシステムであり、脆弱性調査を許可しているという条件で絞り込んだ際に、cdnjsが対象に入ったため調査を行うことにした。</p><h2 id=初期調査>初期調査</h2><p>cdnjsのウェブサイトを眺めている際に、以下のような記述を発見した。</p><blockquote><p>Couldn&rsquo;t find the library you&rsquo;re looking for?<br>You can make a request to have it added on our GitHub repository.</p></blockquote><p>GitHubのリポジトリ上でライブラリの情報を管理している事がわかったため、当該のGitHub Organizationのリポジトリを確認した。</p><p>結果として、以下のような構成になっていることがわかった。</p><ul><li><a href=https://github.com/cdnjs/packages target=_blank>cdnjs/packages</a>: cdnjsに掲載するライブラリの情報を格納</li><li><a href=https://github.com/cdnjs/cdnjs target=_blank>cdnjs/cdnjs</a>: ライブラリの実際のファイル群を格納</li><li><a href=https://github.com/cdnjs/logs target=_blank>cdnjs/logs</a>: ライブラリの更新ログを格納</li><li><a href=https://github.com/cdnjs/SRIs target=_blank>cdnjs/SRIs</a>: 各ライブラリのSRI(Subresource Integrity)を格納</li><li><a href=https://github.com/cdnjs/static-website target=_blank>cdnjs/static-website</a>: cdnjs.comのソースコード</li><li><a href=https://github.com/cdnjs/origin-worker target=_blank>cdnjs/origin-worker</a>: cdnjs.cloudflare.comのオリジン用Cloudflare Worker</li><li><a href=https://github.com/cdnjs/tools target=_blank>cdnjs/tools</a>: cdnjsの管理用ツール</li><li><a href=https://github.com/cdnjs/bot-ansible target=_blank>cdnjs/bot-ansible</a>: cdnjsの自動ライブラリ更新用システムのAnsible</li></ul><p>これらのリポジトリから分かるように、cdnjsのインフラの大部分はこのGitHub Organizationに集約されている。<br>その中で、<a href=https://github.com/cdnjs/bot-ansible target=_blank>cdnjs/bot-ansible</a>と<a href=https://github.com/cdnjs/tools target=_blank>cdnjs/tools</a>に興味を惹かれた。<br>この2つのリポジトリのコードを読んだ所、<a href=https://github.com/cdnjs/bot-ansible target=_blank>cdnjs/bot-ansible</a>が定期的に<a href=https://github.com/cdnjs/tools/tree/b6833e08108b2a06b3b3e5f212d604b5951ff924 target=_blank>cdnjs/tools</a>の<code>autoupdate</code>コマンドをライブラリ更新用サーバー内で実行し、<a href=https://github.com/cdnjs/packages target=_blank>cdnjs/packages</a>において指定されているGitリポジトリ/npmパッケージを用いて更新を確認していることがわかった。</p><h2 id=自動更新機能の調査>自動更新機能の調査</h2><p>この自動更新機能は、ユーザーが管理するGitリポジトリ/npmパッケージをダウンロードし、対象のファイルをコピーすることによってライブラリを更新していた。<br>npmレジストリは、各ライブラリを<code>.tgz</code>ファイルとして圧縮した上でダウンロードができるようにしている。<br>この自動更新用のツールがGoで記述されていることから、Goの<code>compress/gzip</code>及び<code>archive/tar</code>を用いて解凍しているのではないかと推測した。<br>Goの<code>archive/tar</code>はアーカイブ内に含まれるファイルパスをサニタイズせずに返す<sup id=fnref:3><a href=#fn:3 class=footnote-ref role=doc-noteref>3</a></sup>ため、もし仮に<code>archive/tar</code>から返されたファイル名を元にしてディスク上に書き込んでいる場合、<code>../../../../../../../../../tmp/test</code>のようなファイル名を持つファイルを<code>.tgz</code>に含めることにより、任意のファイルを上書きできる。<sup id=fnref:4><a href=#fn:4 class=footnote-ref role=doc-noteref>4</a></sup><br><a href=https://github.com/cdnjs/bot-ansible target=_blank>cdnjs/bot-ansible</a>の情報から、いくつかのスクリプトが定期的に実行されており、それらに対して書き込み権限があることがわかっていたため、パストラバーサルを介したファイルの上書きを重点的に確認することにした。</p><p><img class=img-zoomable src=/img/cdnjs-tgz-slip.png alt=パストラバーサルを行うために細工したtgzファイルの画像></p><h2 id=パストラバーサル>パストラバーサル</h2><p>パストラバーサルを探すために、<code>autoupdate</code>コマンドの<code>main</code>関数を読み始めた。</p><pre><code class=language-go>func main() {
+        [...]	
+		switch *pckg.Autoupdate.Source {
+		case &quot;npm&quot;:
+			{
+				util.Debugf(ctx, &quot;running npm update&quot;)
+				newVersionsToCommit, allVersions = updateNpm(ctx, pckg)
+			}
+		case &quot;git&quot;:
+			{
+				util.Debugf(ctx, &quot;running git update&quot;)
+				newVersionsToCommit, allVersions = updateGit(ctx, pckg)
+			}
+		[...]
+}
+</code></pre><p>上記のコードから分かるように、<code>npm</code>をベースとした自動更新が指定されていた場合は、<code>updateNpm</code>関数へとパッケージ情報を渡している。</p><pre><code class=language-go>func updateNpm(ctx context.Context, pckg *packages.Package) ([]newVersionToCommit, []version) {
+		[...]
+		newVersionsToCommit = doUpdateNpm(ctx, pckg, newNpmVersions)
+        [...]
+}
+</code></pre><p>そして、新しいライブラリバージョンの情報と共に<code>doUpdateNpm</code>関数を呼び出す。</p><pre><code class=language-go>func doUpdateNpm(ctx context.Context, pckg *packages.Package, versions []npm.Version) []newVersionToCommit {
+    [...]
+	for _, version := range versions {
+        [...]
+		tarballDir := npm.DownloadTar(ctx, version.Tarball)
+		filesToCopy := pckg.NpmFilesFrom(tarballDir)
+        [...]
+}
+</code></pre><p>次に、<code>npm.DownloadTar</code>関数へ新しいバージョンの<code>.tgz</code>ファイルのURLを渡す。</p><pre><code class=language-go>func DownloadTar(ctx context.Context, url string) string {
+	dest, err := ioutil.TempDir(&quot;&quot;, &quot;npmtarball&quot;)
+	util.Check(err)
+
+	util.Debugf(ctx, &quot;download %s in %s&quot;, url, dest)
+
+	resp, err := http.Get(url)
+	util.Check(err)
+
+	defer resp.Body.Close()
+
+	util.Check(Untar(dest, resp.Body))
+	return dest
+}
+</code></pre><p>最後に、<code>http.Get</code>を使用して取得した<code>.tgz</code>ファイルを、<code>Untar</code>関数へと渡す。</p><pre><code class=language-go>func Untar(dst string, r io.Reader) error {
+	gzr, err := gzip.NewReader(r)
+	if err != nil {
+		return err
+	}
+	defer gzr.Close()
+	tr := tar.NewReader(gzr)
+	for {
+		header, err := tr.Next()
+        [...]
+		// the target location where the dir/file should be created
+		target := filepath.Join(dst, removePackageDir(header.Name))
+        [...]
+		// check the file type
+		switch header.Typeflag {
+        [...]
+		// if it's a file create it
+		case tar.TypeReg:
+			{
+                [...]
+				f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
+                [...]
+				// copy over contents
+				if _, err := io.Copy(f, tr); err != nil {
+					return err
+				}
+			}
+		}
+	}
+}
+</code></pre><p>予想通り、<code>Untar</code>関数内において<code>compress/gzip</code>と<code>archive/tar</code>を使用して解凍を行っていた。<br>最初は<code>removePackageDir</code>においてパスのサニタイズを行っているのだと考えていたのだが、関数の内容を確認した所、単純に<code>package/</code>という文字列をパスから削除するだけの関数だった。<br>これにより、npmへ公開した<code>.tgz</code>ファイルからパストラバーサルを行い、サーバー上で定期的に実行されるスクリプトを上書きした上で任意のコードが実行できるということがわかった。</p><h2 id=脆弱性のデモンストレーション>脆弱性のデモンストレーション</h2><p>CloudflareはHackerOne上に脆弱性開示制度を持っているため、脆弱性が実際に攻撃可能であることを示さなければ、HackerOneのトリアージチームがCloudflare側にレポートを転送しない可能性が高い。<br>そのため、脆弱性が実際に攻撃出来ることを示すためにデモンストレーションを行うことにした。</p><p>攻撃手順としては、以下のとおりとなる。</p><ol><li>細工したファイル名を含む<code>.tgz</code>ファイルをnpm上で公開する。</li><li>cdnjsの自動更新サーバーがファイルを処理するのを待つ。</li><li>細工した<code>.tgz</code>ファイルの中身が定期実行されているスクリプトファイルへと書き込まれ、任意のコードが実行される。</li></ol><p>&mldr;と、ここまで考えた所でGitリポジトリをベースとした自動更新機能が気になってきた。<br>そのため、脆弱性のデモンストレーションを行う前にコードを流し読みした所、以下のコードのように、Gitリポジトリからファイルをコピーする際に、シンボリックリンクの存在が考慮されていないように見受けられた。</p><pre><code class=language-go>func MoveFile(sourcePath, destPath string) error {
+	inputFile, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf(&quot;Couldn't open source file: %s&quot;, err)
+	}
+	outputFile, err := os.Create(destPath)
+	if err != nil {
+		inputFile.Close()
+		return fmt.Errorf(&quot;Couldn't open dest file: %s&quot;, err)
+	}
+	defer outputFile.Close()
+	_, err = io.Copy(outputFile, inputFile)
+	inputFile.Close()
+	if err != nil {
+		return fmt.Errorf(&quot;Writing to output file failed: %s&quot;, err)
+	}
+	// The copy was successful, so now delete the original file
+	err = os.Remove(sourcePath)
+	if err != nil {
+		return fmt.Errorf(&quot;Failed removing original file: %s&quot;, err)
+	}
+	return nil
+}
+</code></pre><p>Gitはシンボリックリンクを扱うことが可能なため、Gitリポジトリにシンボリックリンクを含め、cdnjsに処理させることによりcdnjsシステム上の任意のファイルを読み取れる可能性がある。</p><p>ファイルを上書きして任意のコードを実行するように書き換えた場合、自動更新機能が適切に動作しなくなってしまう可能性があったため、シンボリックリンクによる任意ファイル読み取りを先に検証/報告し、パストラバーサルに関してはそのレポート内でCloudflareのセキュリティチームに確認後、デモンストレーションを行おうと考えた。</p><p>これに伴い、攻撃手順を以下のように変更した。</p><ol><li>cdnjsに登録されたGitリポジトリに、無害なファイル(ここでは<code>/proc/self/maps</code>を想定)へとリンクさせたシンボリックリンクを追加する。</li><li>当該のGitリポジトリ上で、新しいバージョンを公開する。</li><li>cdnjsの自動更新サーバーがファイルを処理するのを待つ。</li><li>指定したファイルが読み取られ、公開される。</li></ol><p>この時点で20時頃だったのだが、シンボリックリンクを作成するだけであれば直ぐに済ませられると考え、シンボリックリンクを作成/プッシュしてから夕飯を食べることにした。<sup id=fnref:5><a href=#fn:5 class=footnote-ref role=doc-noteref>5</a></sup></p><pre><code class=language-bash>ln -s /proc/self/maps test.js
+</code></pre><h2 id=インシデント>インシデント</h2><p>夕飯を済ませ、PCの前に戻ってきた所、cdnjsがシンボリックリンクを含むバージョンを公開していることが確認できた。</p><p>その後、レポートを送信するためにファイル内容を確認して驚愕した。<br>なんと、<code>GITHUB_REPO_API_KEY</code>や、<code>WORKERS_KV_API_TOKEN</code>といった明らかに機微な情報が表示されていたのである。<br>一瞬何が起こったのか理解できず、コマンドのログを確かめた所、誤って<code>/proc/self/maps</code>ではなく<code>/proc/self/environ</code>へのリンクを貼っていたことが確認できた。<sup id=fnref:6><a href=#fn:6 class=footnote-ref role=doc-noteref>6</a></sup><br>先述の通り、cdnjsのGitHub Organizationが侵害された場合、cdnjsの大部分を侵害することが可能となる。<br>すぐにでも対応する必要があったため、レポートには現在の状況がわかるリンクとトークン類を全て取り消して欲しいという旨のみを記載し、送信した。</p><p>この時点ではとても焦っており確認していなかったが、実はレポートを送信する前にこれらのトークンは無効化されていた。<br>これは後からわかったことだが、<code>GITHUB_REPO_API_KEY</code>(GitHubのAPIキー)が含まれていたことにより、即座にGitHubが自動で通知を行い、それを受け取ったCloudflareはインシデントレスポンスを開始していたらしい。<br>cdnjsが細工されたパッケージを処理してから数分も立たない内に各種認証情報の無効化を行っていたらしく、流石Cloudflareだな、という印象を受けた。</p><h2 id=影響調査>影響調査</h2><p>その後、詳細な影響範囲の調査を行った。<br><code>GITHUB_REPO_API_KEY</code>はcdnjsのGitHub Organizationに所属している<a href=https://github.com/robocdnjs target=_blank>robocdnjs</a>というアカウントのアクセストークンであり、cdnjsの各リポジトリに対する書き込み権限を持っていた。<br>つまり、cdnjs上でホストされている任意のライブラリの改竄や、ウェブサイトの改竄などをこのトークンを用いて行うことができた。</p><p>また、<code>WORKERS_KV_API_TOKEN</code>は、cdnjsに使用されているCloudflare WorkersのKVに対する書き込み権限を持っており、KVにキャッシュされたライブラリ情報を改竄することが可能だった。<br>これらの権限を組み合わせることにより、cdnjsのオリジンデータからKVキャッシュ、更にはcdnjsのウェブサイトといったcdnjsのコア部分を完全に侵害することができたと考えられる。</p><h2 id=まとめ>まとめ</h2><p>今回の記事では、cdnjsに存在した脆弱性について解説しました。<br>脆弱性自体は特殊なスキル無しで悪用可能なものでしたが、それによって潜在的に生じる影響が非常に大きいものでした。<br>世の中にはこの脆弱性のような、悪用が簡単なのにも関わらず、影響が非常に大きい脆弱性がサプライチェーンの中にあると考えると、非常に恐ろしいものだと感じます。<br>本記事に関する質問/感想はTwitter(<a href=https://twitter.com/ryotkak target=_blank>@ryotkak</a>)へメッセージを送信してください。</p><h2 id=タイムライン>タイムライン</h2><table><thead><tr><th>日付 (日本時間)</th><th>出来事</th></tr></thead><tbody><tr><td>2021/04/06 19時頃</td><td>脆弱性の発見、検証開始</td></tr><tr><td>2021/04/06 20時頃</td><td>デモンストレーション用のファイルを公開</td></tr><tr><td>2021/04/06 20時半頃</td><td>cdnjsがファイルを処理</td></tr><tr><td>同時刻</td><td>GitHubがアラートをCloudflareへ送信</td></tr><tr><td>同時刻</td><td>Cloudflare内部でインシデントレスポンスが始まる</td></tr><tr><td>数分以内</td><td>各種認証情報の取り消しが完了する</td></tr><tr><td>2021/04/06 20時40分頃</td><td>初期レポートを送信</td></tr><tr><td>2021/04/06 21時頃</td><td>詳細なレポートを送信</td></tr><tr><td>2021/04/07～</td><td>二次対応が完了</td></tr><tr><td>2021/06/03</td><td>完全な対応が完了</td></tr><tr><td>2021/07/16</td><td>本記事の公開</td></tr></tbody></table><section class=footnotes role=doc-endnotes><hr><ol><li id=fn:1 role=doc-endnote><p><a href=https://w3techs.com/technologies/details/cd-cdnjs target=_blank>W3Techs</a>より7月15日の情報を引用。SRI/キャッシュの存在により、即座に改竄可能だったウェブサイトはこの数字よりも少なかった。 <a href=#fnref:1 class=footnote-backref role=doc-backlink>&#8617;&#xfe0e;</a></p></li><li id=fn:2 role=doc-endnote><p><a href=https://w3techs.com/technologies/details/cd-googlelibraries target=_blank>W3Techs</a>より7月15日時点の情報を引用。 <a href=#fnref:2 class=footnote-backref role=doc-backlink>&#8617;&#xfe0e;</a></p></li><li id=fn:3 role=doc-endnote><p><a href=https://github.com/golang/go/issues/25849>https://github.com/golang/go/issues/25849</a> <a href=#fnref:3 class=footnote-backref role=doc-backlink>&#8617;&#xfe0e;</a></p></li><li id=fn:4 role=doc-endnote><p>このようなアーカイブファイルは、<a href=https://github.com/ptoomey3/evilarc target=_blank>evilarc</a>といったようなツールを用いることにより作成することが出来る。 <a href=#fnref:4 class=footnote-backref role=doc-backlink>&#8617;&#xfe0e;</a></p></li><li id=fn:5 role=doc-endnote><p>記憶が定かではないが、この日の夕食は冷凍餃子だったと思う。 <a href=#fnref:5 class=footnote-backref role=doc-backlink>&#8617;&#xfe0e;</a></p></li><li id=fn:6 role=doc-endnote><p>仕事で疲れていたのと、空腹だった事が重なり、ろくに確認もせずに補完されたコマンドを実行してしまっていた。 <a href=#fnref:6 class=footnote-backref role=doc-backlink>&#8617;&#xfe0e;</a></p></li></ol></section></div></article></div><aside class="col-12 col-md-3 float-left sidebar"><div class="sidebar-item sidebar-pages"><h3>ページ</h3><ul><li><a href=/>Home</a></li><li><a href=/archives/>Archives</a></li><li><a href=/about/>About</a></li><li><a href=/search/>Search</a></li><li><a href=/index.xml>RSS</a></li></ul></div><div class="sidebar-item sidebar-links"><h3>リンク</h3><ul><li><a href=https://twitter.com/ryotkak target=_blank><span>Twitter</span></a></li><li><a href=https://github.com/Ry0taK target=_blank><span>GitHub</span></a></li></ul></div><div class="sidebar-item sidebar-tags"><h3>タグ</h3><div><span><a href=/tags/brute-force/>Brute Force</a></span>
+<span><a href=/tags/bug-bounty/>Bug Bounty</a></span>
+<span><a href=/tags/cdnjs/>cdnjs</a></span>
+<span><a href=/tags/fleet/>Fleet</a></span>
+<span><a href=/tags/github/>GitHub</a></span>
+<span><a href=/tags/github-actions/>GitHub Actions</a></span>
+<span><a href=/tags/go/>Go</a></span>
+<span><a href=/tags/homebrew/>Homebrew</a></span>
+<span><a href=/tags/idor/>IDOR</a></span>
+<span><a href=/tags/microsoft/>Microsoft</a></span>
+<span><a href=/tags/privilege-escalation/>Privilege Escalation</a></span>
+<span><a href=/tags/rce/>RCE</a></span>
+<span><a href=/tags/ruby/>Ruby</a></span>
+<span><a href=/tags/supply-chain/>Supply Chain</a></span>
+<span><a href=/tags/timing-attack/>Timing Attack</a></span>
+<span><a href=/tags/twitter/>Twitter</a></span>
+<span><a href=/tags/vscode/>VSCode</a></span>
+<span><a href=/tags/vulnerability/>Vulnerability</a></span>
+<span><a href=/tags/%E8%84%86%E5%BC%B1%E6%80%A7/>脆弱性</a></span></div></div></aside></div><div class=btn><div class=btn-menu id=btn-menu><i class="iconfont icon-grid-sharp"></i></div><div class=btn-toggle-mode><i class="iconfont icon-contrast-sharp"></i></div><div class=btn-scroll-top><i class="iconfont icon-chevron-up-circle-sharp"></i></div></div><aside class=sidebar-mobile style=display:none><div class=sidebar-wrapper><div class="sidebar-item sidebar-pages"><h3>ページ</h3><ul><li><a href=/>Home</a></li><li><a href=/archives/>Archives</a></li><li><a href=/about/>About</a></li><li><a href=/search/>Search</a></li><li><a href=/index.xml>RSS</a></li></ul></div><div class="sidebar-item sidebar-links"><h3>リンク</h3><ul><li><a href=https://twitter.com/ryotkak target=_blank><span>Twitter</span></a></li><li><a href=https://github.com/Ry0taK target=_blank><span>GitHub</span></a></li></ul></div><div class="sidebar-item sidebar-tags"><h3>タグ</h3><div><span><a href=/tags/brute-force/>Brute Force</a></span>
+<span><a href=/tags/bug-bounty/>Bug Bounty</a></span>
+<span><a href=/tags/cdnjs/>cdnjs</a></span>
+<span><a href=/tags/fleet/>Fleet</a></span>
+<span><a href=/tags/github/>GitHub</a></span>
+<span><a href=/tags/github-actions/>GitHub Actions</a></span>
+<span><a href=/tags/go/>Go</a></span>
+<span><a href=/tags/homebrew/>Homebrew</a></span>
+<span><a href=/tags/idor/>IDOR</a></span>
+<span><a href=/tags/microsoft/>Microsoft</a></span>
+<span><a href=/tags/privilege-escalation/>Privilege Escalation</a></span>
+<span><a href=/tags/rce/>RCE</a></span>
+<span><a href=/tags/ruby/>Ruby</a></span>
+<span><a href=/tags/supply-chain/>Supply Chain</a></span>
+<span><a href=/tags/timing-attack/>Timing Attack</a></span>
+<span><a href=/tags/twitter/>Twitter</a></span>
+<span><a href=/tags/vscode/>VSCode</a></span>
+<span><a href=/tags/vulnerability/>Vulnerability</a></span>
+<span><a href=/tags/%E8%84%86%E5%BC%B1%E6%80%A7/>脆弱性</a></span></div></div></div></aside></main><footer><div class="container-lg clearfix"><div class="col-12 footer"><span>&copy; 2021
+<a href=https://blog.ryotak.me>RyotaK</a>
+| Powered by <a href=https://github.com/dsrkafuu/hugo-theme-fuji/ target=_blank>Fuji-v2</a> & <a href=https://gohugo.io/ target=_blank>Hugo</a></span></div></div></footer><script defer src=https://cdn.jsdelivr.net/npm/medium-zoom@1.0.6/dist/medium-zoom.min.js></script><script defer src=https://cdn.jsdelivr.net/npm/lazysizes@5.3.2/lazysizes.min.js></script><script defer src=https://cdn.jsdelivr.net/npm/prismjs@1.23.0/components/prism-core.min.js></script><script defer src=https://cdn.jsdelivr.net/npm/prismjs@1.23.0/plugins/autoloader/prism-autoloader.min.js></script><script defer src=/assets/js/fuji.min.js></script></body></html>
