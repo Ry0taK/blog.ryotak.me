@@ -170,7 +170,7 @@ func Untar(dst string, r io.Reader) error {
 ```
 
 As I guessed, `compress/gzip` and `archive/tar` were used in `Untar` function to extract `.tgz` file.  
-At first, I thought that it's sanitizing the path in the `removePackageDir` function, but when I checked the contents of the function, I noticed that it's just removing the string `package/` from the path.  
+At first, I thought that it's sanitizing the path in the `removePackageDir` function, but when I checked the contents of the function, I noticed that it's just removing `package/` from the path.  
 From these code snippets, I confirmed that arbitrary code can be executed after performing path traversal from the `.tgz` file published to npm and overwriting the script that is executed regularly on the server.  
 
 
@@ -246,7 +246,7 @@ After the incident, I investigated what could be impacted.
 `GITHUB_REPO_API_KEY` was an API key for [robocdnjs](https://github.com/robocdnjs), which belongs to [cdnjs](https://github.com/cdnjs) organization, and had write permission against each repository.  
 This means it was possible to tamper arbitrary libraries on the cdnjs or tamper the cdnjs.com itself.  
 
-Also, `WORKERS_KV_API_TOKEN` had permission against KV of Cloudflare Workers that is used in the cdnjs, it could be used to tamper the libraries on KV cache.  
+Also, `WORKERS_KV_API_TOKEN` had permission against KV of Cloudflare Workers that is used in the cdnjs, it could be used to tamper the libraries on the KV cache.  
 By combining these permissions, the core part of cdnjs, such as the origin data of cdnjs, the KV cache, and even the cdnjs website, could be completely tampered.    
 
 ## Conclusion
