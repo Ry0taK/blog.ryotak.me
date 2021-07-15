@@ -1,7 +1,7 @@
 ---
 title: "Remote code execution in Homebrew by compromising the official Cask repository"
 date: 2021-04-21T19:00:00+09:00
-tags: ["Homebrew", "脆弱性", "Ruby", "Supply Chain"]
+tags: ["Homebrew", "Vulnerability", "Ruby", "Supply Chain"]
 ---
 
 この記事は日本語でも投稿されています: https://blog.ryotak.me/post/homebrew-security-incident/  
