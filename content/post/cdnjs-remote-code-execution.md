@@ -1,6 +1,6 @@
 ---
 title: "Cloudflareのcdnjsにおける任意コード実行"
-date: 2021-07-01T12:53:03+09:00
+date: 2021-07-16T08:30:00+09:00
 draft: false
 tags: ["cdnjs", "脆弱性", "Go", "Supply Chain", "RCE"]
 ---
@@ -9,28 +9,28 @@ tags: ["cdnjs", "脆弱性", "Go", "Supply Chain", "RCE"]
 
 ([English version](/post/cdnjs-remote-code-execution-en) is also available.)  
 
-cdnjsの運営元であるCloudflareは、HackerOne上で脆弱性開示制度(Vulnerability Disclosure Program)を設けており、脆弱性の診断行為が許可されています。  
+cdnjsの運営元であるCloudflareは、HackerOne上で脆弱性開示制度(Vulnerability Disclosure Program)を設けており、脆弱性の診断行為を許可しています。  
 本記事は、当該制度を通して報告された脆弱性をCloudflareセキュリティチームの許可を得た上で公開しているものであり、無許可の脆弱性診断行為を推奨することを意図したものではありません。  
 Cloudflareが提供する製品に脆弱性を発見した場合は、[Cloudflareの脆弱性開示制度](https://hackerone.com/cloudflare)へ報告してください。  
 
 ## 要約
 
 cdnjsのライブラリ更新用サーバーに任意のコードを実行することが可能な脆弱性が存在し、結果としてcdnjsを完全に侵害することが出来る状態だった。  
-これにより、インターネット上のウェブサイトの内12.6%[^1]をキャッシュの有効期限が切れた後に改竄することが可能となっていた。
+これにより、インターネット上のウェブサイトの内12.7%[^1]を改竄することが可能となっていた。
 
-[^1]: [W3Techs](https://w3techs.com/technologies/details/cd-cdnjs)より記事執筆時点の情報を引用。SRI/キャッシュの存在により、即座に改竄可能だったウェブサイトはこの数字よりも少なかった。
+[^1]: [W3Techs](https://w3techs.com/technologies/details/cd-cdnjs)より7月15日の情報を引用。SRI/キャッシュの存在により、即座に改竄可能だったウェブサイトはこの数字よりも少なかった。
 
 ## cdnjsとは
 
-[cdnjs](https://cdnjs.com)は、Cloudflareによって運営されている無料のJavaScript/CSSライブラリ用CDNであり、記事執筆時点でインターネット上のウェブサイトの12.6%に使用されている。  
+[cdnjs](https://cdnjs.com)は、Cloudflareによって運営されている無料のJavaScript/CSSライブラリ用CDNであり、記事公開時点でインターネット上のウェブサイトの12.7%に使用されている。  
 これは、[Google Hosted Libraries](https://developers.google.com/speed/libraries)の12.8%[^2]に次いで2番目に広く使われているライブラリ用CDNであり、現在の使用率の推移を鑑みるに、近いうちに最も使われているJavaScriptライブラリ用CDNになると考えられる。  
 
 <div style="text-align: center;">
   <img src="/img/cdnjs-usage.png" alt="cdnjsのインターネット上での使用率">
-  <p>2021年7月2日時点での<a href="https://w3techs.com/technologies/details/cd-cdnjs" target="_blank">W3Techs</a>におけるcdnjsの使用率グラフ</p>
+  <p>2021年7月15日時点での<a href="https://w3techs.com/technologies/details/cd-cdnjs" target="_blank">W3Techs</a>におけるcdnjsの使用率グラフ</p>
 </div>
 
-[^2]: [W3Techs](https://w3techs.com/technologies/details/cd-googlelibraries)より記事執筆時点の情報を引用。
+[^2]: [W3Techs](https://w3techs.com/technologies/details/cd-googlelibraries)より7月15日時点の情報を引用。
 
 ## 調査理由
 
@@ -183,25 +183,52 @@ CloudflareはHackerOne上に脆弱性開示制度を持っているため、脆�
 3. 細工した`.tgz`ファイルの中身が定期実行されているスクリプトファイルへと書き込まれ、任意のコードが実行される。
 
 ...と、ここまで考えた所でGitリポジトリをベースとした自動更新機能が気になってきた。  
-そのため、脆弱性のデモンストレーションを行う前にコードを流し読みした所、Gitリポジトリからファイルをコピーする際に、シンボリックリンクの存在が考慮されていないように見受けられた。  
+そのため、脆弱性のデモンストレーションを行う前にコードを流し読みした所、以下のコードのように、Gitリポジトリからファイルをコピーする際に、シンボリックリンクの存在が考慮されていないように見受けられた。  
+```go
+func MoveFile(sourcePath, destPath string) error {
+	inputFile, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("Couldn't open source file: %s", err)
+	}
+	outputFile, err := os.Create(destPath)
+	if err != nil {
+		inputFile.Close()
+		return fmt.Errorf("Couldn't open dest file: %s", err)
+	}
+	defer outputFile.Close()
+	_, err = io.Copy(outputFile, inputFile)
+	inputFile.Close()
+	if err != nil {
+		return fmt.Errorf("Writing to output file failed: %s", err)
+	}
+	// The copy was successful, so now delete the original file
+	err = os.Remove(sourcePath)
+	if err != nil {
+		return fmt.Errorf("Failed removing original file: %s", err)
+	}
+	return nil
+}
+```
 Gitはシンボリックリンクを扱うことが可能なため、Gitリポジトリにシンボリックリンクを含め、cdnjsに処理させることによりcdnjsシステム上の任意のファイルを読み取れる可能性がある。  
 
-ファイルを上書きして任意のコードを実行するように書き換えた場合、自動更新機能が適切に動作しなくなってしまう可能性があったため、シンボリックリンクによる任意ファイル読み取りを先に検証し、パストラバーサルに関してはそのレポート内でデモンストレーションを行おうと考えた。  
+ファイルを上書きして任意のコードを実行するように書き換えた場合、自動更新機能が適切に動作しなくなってしまう可能性があったため、シンボリックリンクによる任意ファイル読み取りを先に検証/報告し、パストラバーサルに関してはそのレポート内でCloudflareのセキュリティチームに確認後、デモンストレーションを行おうと考えた。  
+
 これに伴い、攻撃手順を以下のように変更した。  
 1. cdnjsに登録されたGitリポジトリに、無害なファイル(ここでは`/proc/self/maps`を想定)へとリンクさせたシンボリックリンクを追加する。
 2. 当該のGitリポジトリ上で、新しいバージョンを公開する。
 3. cdnjsの自動更新サーバーがファイルを処理するのを待つ。
 4. 指定したファイルが読み取られ、公開される。
 
-この時点で20時頃だったのだが、シンボリックリンクを作成するだけであれば直ぐに済ませられると考え、シンボリックリンクを作成してから夕飯を食べることにした。[^5]  
+この時点で20時頃だったのだが、シンボリックリンクを作成するだけであれば直ぐに済ませられると考え、シンボリックリンクを作成/プッシュしてから夕飯を食べることにした。[^5]  
 ```bash
 ln -s /proc/self/maps test.js
 ```
 
-[^5]: 記憶が定かではないが、この日の夕食は冷凍餃子だったと記憶している。
+[^5]: 記憶が定かではないが、この日の夕食は冷凍餃子だったと思う。
 
 ## インシデント
 夕飯を済ませ、PCの前に戻ってきた所、cdnjsがシンボリックリンクを含むバージョンを公開していることが確認できた。  
+
 その後、レポートを送信するためにファイル内容を確認して驚愕した。  
 なんと、`GITHUB_REPO_API_KEY`や、`WORKERS_KV_API_TOKEN`といった明らかに機微な情報が表示されていたのである。  
 一瞬何が起こったのか理解できず、コマンドのログを確かめた所、誤って`/proc/self/maps`ではなく`/proc/self/environ`へのリンクを貼っていたことが確認できた。[^6]  
@@ -210,14 +237,15 @@ ln -s /proc/self/maps test.js
 
 [^6]: 仕事で疲れていたのと、空腹だった事が重なり、ろくに確認もせずに補完されたコマンドを実行してしまっていた。
 
-この時点ではとても焦っており確認していなかったのだが、実はレポートを送信する前にこれらのトークンは無効化されていた。  
-これは後からわかったことなのだが、`GITHUB_REPO_API_KEY`(GitHubのAPIキー)が含まれていたことにより、即座にGitHubが自動で通知を行い、それを受け取ったCloudflareはインシデントレスポンスを開始していたらしい。  
+この時点ではとても焦っており確認していなかったが、実はレポートを送信する前にこれらのトークンは無効化されていた。  
+これは後からわかったことだが、`GITHUB_REPO_API_KEY`(GitHubのAPIキー)が含まれていたことにより、即座にGitHubが自動で通知を行い、それを受け取ったCloudflareはインシデントレスポンスを開始していたらしい。  
 cdnjsが細工されたパッケージを処理してから数分も立たない内に各種認証情報の無効化を行っていたらしく、流石Cloudflareだな、という印象を受けた。  
 
 ## 影響調査
 その後、詳細な影響範囲の調査を行った。  
 `GITHUB_REPO_API_KEY`はcdnjsのGitHub Organizationに所属している[robocdnjs](https://github.com/robocdnjs)というアカウントのアクセストークンであり、cdnjsの各リポジトリに対する書き込み権限を持っていた。  
 つまり、cdnjs上でホストされている任意のライブラリの改竄や、ウェブサイトの改竄などをこのトークンを用いて行うことができた。  
+
 また、`WORKERS_KV_API_TOKEN`は、cdnjsに使用されているCloudflare WorkersのKVに対する書き込み権限を持っており、KVにキャッシュされたライブラリ情報を改竄することが可能だった。  
 これらの権限を組み合わせることにより、cdnjsのオリジンデータからKVキャッシュ、更にはcdnjsのウェブサイトといったcdnjsのコア部分を完全に侵害することができたと考えられる。  
 
@@ -225,7 +253,7 @@ cdnjsが細工されたパッケージを処理してから数分も立たない
 今回の記事では、cdnjsに存在した脆弱性について解説しました。  
 脆弱性自体は特殊なスキル無しで悪用可能なものでしたが、それによって潜在的に生じる影響が非常に大きいものでした。    
 世の中にはこの脆弱性のような、悪用が簡単なのにも関わらず、影響が非常に大きい脆弱性がサプライチェーンの中にあると考えると、非常に恐ろしいものだと感じます。  
-本記事に関する質問/感想はTwitter([@ryotkak](https://twitter.com/ryotkak))へメッセージを投げてください。
+本記事に関する質問/感想はTwitter([@ryotkak](https://twitter.com/ryotkak))へメッセージを送信してください。
 ## タイムライン
 |日付 (日本時間)|出来事|
 |----|----|
@@ -239,4 +267,4 @@ cdnjsが細工されたパッケージを処理してから数分も立たない
 |2021/04/06 21時頃|詳細なレポートを送信|
 |2021/04/07～|二次対応が完了|
 |2021/06/03|完全な対応が完了|
-|2021/07/XX|本記事の公開|
+|2021/07/16|本記事の公開|

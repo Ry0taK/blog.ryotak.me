@@ -1,6 +1,6 @@
 ---
 title: "Remote code execution in cdnjs of Cloudflare"
-date: 2021-07-01T12:53:03+09:00
+date: 2021-07-16T08:30:00+09:00
 draft: false
 tags: ["cdnjs", "Vulnerability", "Go", "Supply Chain", "RCE"]
 ---
@@ -16,21 +16,21 @@ If you found any vulnerabilities in Cloudflare's product, please report it to [C
 
 ## TL;DR
 There was a vulnerability in the cdnjs library update server that could execute arbitrary commands, and as a result, cdnjs could be completely compromised.  
-This allows an attacker to tamper 12.6%[^1] of all websites on the internet once caches are expired.  
+This allows an attacker to tamper 12.7%[^1] of all websites on the internet once caches are expired.  
 
-[^1]: Quoted from [W3Techs](https://w3techs.com/technologies/details/cd-cdnjs) as of 2 July 2021. Due to the presence of SRI / cache, fewer websites could tamper immediately.  
+[^1]: Quoted from [W3Techs](https://w3techs.com/technologies/details/cd-cdnjs) as of 15 July 2021. Due to the presence of SRI / cache, fewer websites could tamper immediately.  
 
 ## About cdnjs
 
-[cdnjs](https://cdnjs.com) is a JavaScript/CSS library CDN that is owned by Cloudflare, which is used by 12.6% of all websites on the internet as of 2 July 2021.  
+[cdnjs](https://cdnjs.com) is a JavaScript/CSS library CDN that is owned by Cloudflare, which is used by 12.7% of all websites on the internet as of 15 July 2021.  
 This is the second most widely used library CDN after 12.8%[^2] of [Google Hosted Libraries](https://developers.google.com/speed/libraries), and considering the current usage rate, it will be the most used JavaScript library CDN in the near future.  
 
 <div style="text-align: center;">
   <img src="/img/cdnjs-usage.png" alt="Usage rate of cdnjs on the internet">
-  <p>Usage graph of cdnjs from <a href="https://w3techs.com/technologies/details/cd-cdnjs" target="_blank">W3Techs</a>, as of 2 July 2021</p>
+  <p>Usage graph of cdnjs from <a href="https://w3techs.com/technologies/details/cd-cdnjs" target="_blank">W3Techs</a>, as of 15 July 2021</p>
 </div>
 
-[^2]: Quoted from [W3Techs](https://w3techs.com/technologies/details/cd-googlelibraries) as of 2 July 2021.
+[^2]: Quoted from [W3Techs](https://w3techs.com/technologies/details/cd-googlelibraries) as of 15 July 2021.
 
 ## Reason for investigation
 
@@ -64,7 +64,7 @@ After reading codes of these 2 repositories, it turned out [cdnjs/bot-ansible](h
 ## Investigation of automatic update
 
 The automatic update function updates the library by downloading the user-managed Git repository / npm package and copying the target file from them.  
-npm registry compress libraries into `.tgz` to make it downloadable.  
+And npm registry compress libraries into `.tgz` to make it downloadable.  
 Since the tool for this automatic update is written in Go, I guessed that it may use Go's `compress/gzip` and `archive/tar` to extract the archive file.  
 Go's `archive/tar` returns the filename contained in the archive without sanitizing[^3], so if the archive is extracted into the disk based on the filename returned from `archive/tar`, archives that contain filename like `../../../../../../../tmp/test` may overwrite arbitrary files on the system. [^4]  
 From the information in [cdnjs/bot-ansible](https://github.com/cdnjs/bot-ansible), I knew that some scripts were running regularly and the user that runs the `autoupdate` command had write permission for them, so I focused on overwriting files via path traversal.  
@@ -183,8 +183,33 @@ The attack procedure is as follows.
 2. Wait for the cdnjs library update server to process the crafted `.tgz` file.
 3. The contents of the file that is published in step 1 are written into a regularly executed script file and arbitrary command is executed.
 
-... and then, for some reason, I started wondering how automatic updates based on the Git repository works.  
+... and after writing the attack procedure into my notepad, for some reason, I started wondering how automatic updates based on the Git repository works.  
 So, I read codes a bit before demonstrating the vulnerability, and it seemed that the symlinks aren't considered when copying files from the Git repository.  
+```go
+func MoveFile(sourcePath, destPath string) error {
+	inputFile, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("Couldn't open source file: %s", err)
+	}
+	outputFile, err := os.Create(destPath)
+	if err != nil {
+		inputFile.Close()
+		return fmt.Errorf("Couldn't open dest file: %s", err)
+	}
+	defer outputFile.Close()
+	_, err = io.Copy(outputFile, inputFile)
+	inputFile.Close()
+	if err != nil {
+		return fmt.Errorf("Writing to output file failed: %s", err)
+	}
+	// The copy was successful, so now delete the original file
+	err = os.Remove(sourcePath)
+	if err != nil {
+		return fmt.Errorf("Failed removing original file: %s", err)
+	}
+	return nil
+}
+```
 As Git supports symbolic links by default, it may be possible to read arbitrary files from the cdnjs library update server by adding symlink into the Git repository.  
 
 If the regularly executed script file is overwritten to execute arbitrary commands, the automatic update function may be broken, so I decided to check the arbitrary file reading first.    
@@ -194,7 +219,7 @@ Along with this, the attack procedure was changed as follows.
 2. Wait for the cdnjs library update server to process the crafted repository.
 4. The specified file is published on cdnjs.
 
-It was around 20:00 at this point, but what I have to do was creating a symlink, so I decided to eat dinner after making the symbolic link and publishing it.[^5]  
+It was around 20:00 at this point, but what I have to do was creating a symlink, so I decided to eat dinner after creating the symbolic link and publishing it.[^5]  
 ```bash
 ln -s /proc/self/maps test.js
 ```
@@ -203,6 +228,7 @@ ln -s /proc/self/maps test.js
 
 ## Incident
 Once I finished the dinner and returning to my PC desk, I was able to confirm that cdnjs has released a version containing symbolic links.    
+
 After checking the contents of the file to send the report, I was surprised.  
 Surprisingly, clearly sensitive information such as `GITHUB_REPO_API_KEY` and `WORKERS_KV_API_TOKEN` was displayed.  
 I couldn't understand what happened for a moment, and when I checked the command log, I found that I accidentally put a link to `/proc/self/environ` instead of `/proc/self/maps`.[^6]  
@@ -212,20 +238,21 @@ I needed to take immediate action, so I sent the report that only contains a lin
 [^6]: Because I was tired from work and I was hungry, I ran the command completed by shell without any confirmation.
 
 At this point, I was very confused and hadn't confirmed it, but in fact, these tokens were invalidated before I sent the report.  
-It seems that GitHub automatically notified immediately because `GITHUB_REPO_API_KEY` (API key of GitHub) was included in the repository, and Cloudflare started incident response immediately after the notification.  
+It seems that GitHub notified Cloudflare immediately because `GITHUB_REPO_API_KEY` (API key of GitHub) was included in the repository, and Cloudflare started incident response immediately after the notification.  
 I felt that they're a great security team because they invalidated all credentials within minutes after cdnjs processed the specially crafted repository.  
 
 ## Determinate impact
 After the incident, I investigated what could be impacted.  
 `GITHUB_REPO_API_KEY` was an API key for [robocdnjs](https://github.com/robocdnjs), which belongs to [cdnjs](https://github.com/cdnjs) organization, and had write permission against each repository.  
 This means it was possible to tamper arbitrary libraries on the cdnjs or tamper the cdnjs.com itself.  
+
 Also, `WORKERS_KV_API_TOKEN` had permission against KV of Cloudflare Workers that is used in the cdnjs, it could be used to tamper the libraries on KV cache.  
 By combining these permissions, the core part of cdnjs, such as the origin data of cdnjs, the KV cache, and even the cdnjs website, could be completely tampered.    
 
 ## Conclusion
 In this article, I described the vulnerability that was existed in cdnjs.  
 While this vulnerability could be exploited without any special skills, it could impact many websites.  
-Given that there are many vulnerabilities in the supply chain, which are easy to exploit but have a very large impact, I feel that it's very scary.  
+Given that there are many vulnerabilities in the supply chain, which are easy to exploit but have a large impact, I feel that it's very scary.  
 If you have any questions/comments about this article, please send a message to [@ryotkak](https://twitter.com/ryotkak) on Twitter.  
 ## Timeline
 |Date (JST)|Event|
@@ -240,4 +267,4 @@ If you have any questions/comments about this article, please send a message to 
 |April 6, 2021 21:00|I sent detailed report|
 |April 7, 2021-|Secondary fix has applied |
 |June 3, 2021|Complete fix has applied|
-|July XX, 2021|Published this article|
+|July 16, 2021|Published this article|
